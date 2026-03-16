@@ -9,33 +9,52 @@ from ui.viewmodel import AppViewModel
 
 
 class HeaderBar(tk.Frame):
+
+    HEIGHT = 50
+
     def __init__(self, parent: tk.Misc, vm: AppViewModel) -> None:
-        super().__init__(parent, bg=PALETTE["bg_panel"], height=52)
+        super().__init__(parent, bg=PALETTE["bg_panel"], height=self.HEIGHT)
         self._vm = vm
         self.pack_propagate(False)
         self._build()
+        # Trait ambre en bas du header
+        self._accent_line = tk.Frame(self, bg=PALETTE["accent"], height=2)
+        self._accent_line.pack(side="bottom", fill="x")
 
     def _build(self) -> None:
-        # Logo / titre
+        # Logo + titre
+        logo_frame = tk.Frame(self, bg=PALETTE["bg_panel"])
+        logo_frame.pack(side="left", padx=(18, 0))
+
         tk.Label(
-            self, text="⚙  FANUC Variable Extractor",
+            logo_frame, text="◈",
             bg=PALETTE["bg_panel"], fg=PALETTE["accent"],
-            font=FONTS["title"], padx=20,
-        ).pack(side="left", pady=10)
+            font=("Consolas", 16),
+        ).pack(side="left", pady=12)
 
-        # Séparateur vertical
-        ttk.Separator(self, orient="vertical").pack(side="left", fill="y", pady=8)
-
-        # Tag version
         tk.Label(
-            self, text="v1.0",
-            bg=PALETTE["bg_panel"], fg=PALETTE["text_dim"],
-            font=FONTS["small"], padx=10,
+            logo_frame, text="  FANUC",
+            bg=PALETTE["bg_panel"], fg=PALETTE["text"],
+            font=FONTS["title"],
         ).pack(side="left")
 
-        # Bouton Paramètres (droite)
+        tk.Label(
+            logo_frame, text=" Variable Extractor",
+            bg=PALETTE["bg_panel"], fg=PALETTE["text_dim"],
+            font=("Segoe UI", 10),
+        ).pack(side="left")
+
+        # Version
+        tk.Label(
+            self, text="v1.0",
+            bg=PALETTE["bg_panel"], fg=PALETTE["text_muted"],
+            font=FONTS["tag"],
+        ).pack(side="left", padx=12)
+
+        # Bouton paramètres
         ttk.Button(
-            self, text="⚙ Paramètres",
+            self, text="⚙  Paramètres",
+            style="Ghost.TButton",
             command=self._open_settings,
         ).pack(side="right", padx=16, pady=10)
 

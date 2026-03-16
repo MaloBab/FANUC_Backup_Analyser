@@ -6,7 +6,6 @@ Pattern MVVM : l'UI ne connaît que le ViewModel, jamais les services directemen
 
 from __future__ import annotations
 import logging
-import threading
 from pathlib import Path
 from typing import Callable
 
@@ -19,9 +18,11 @@ logger = logging.getLogger(__name__)
 
 
 class AppViewModel:
-    """
-    État global de l'application + commandes déclenchables par l'UI.
-    Les callbacks on_* sont branchés par App après instanciation.
+    """État global de l'application + commandes déclenchables par l'UI.
+
+    Les callbacks ``on_*`` sont branchés par ``App._bind_viewmodel()`` après
+    instanciation. Ils sont tous optionnels (``None`` par défaut) — le ViewModel
+    fonctionne sans UI pour les tests.
     """
 
     # Callbacks — branchés par App._bind_viewmodel
@@ -29,106 +30,159 @@ class AppViewModel:
     on_progress_change: Callable[[int, int], None] | None = None
     on_results_ready:   Callable[[ExtractionResult], None] | None = None
     on_log_message:     Callable[[str, str], None] | None = None  # (msg, level)
+    on_scope_change:    Callable[[str], None] | None = None        # scope filter
 
     def __init__(self, settings: Settings) -> None:
-        self.settings = settings
+        self.settings      = settings
         self._orchestrator = ExtractionOrchestrator(settings)
-        self._worker = BackgroundWorker()
+        self._worker       = BackgroundWorker()
 
         # État observable
-        self.input_dir: Path | None = None
-        self.output_dir: Path | None = None
+        self.input_dir:   Path | None = None
+        self.output_dir:  Path | None = None
         self.last_result: ExtractionResult | None = None
-        self.is_busy: bool = False
+        self.is_busy:     bool = False
+
+        # Référence Tkinter root — injectée par App pour le polling after()
+        self._tk_root = None
+
+    # ------------------------------------------------------------------
+    # Injection (appelée par App)
+    # ------------------------------------------------------------------
+
+    def set_tk_root(self, root) -> None:
+        """Injecte la référence à la fenêtre Tkinter racine pour le polling."""
+        self._tk_root = root
 
     # ------------------------------------------------------------------
     # Commandes (appelées par l'UI)
     # ------------------------------------------------------------------
 
     def set_input_dir(self, path: str) -> None:
-        self.input_dir = Path(path)
+        """Met à jour le dossier source et persiste dans les settings."""
+        self.input_dir             = Path(path)
         self.settings.last_input_dir = path
         self._emit_status(f"Dossier source : {path}")
 
     def set_output_dir(self, path: str) -> None:
-        self.output_dir = Path(path)
+        """Met à jour le dossier de sortie et persiste dans les settings."""
+        self.output_dir              = Path(path)
         self.settings.last_output_dir = path
 
+    def set_scope_filter(self, scope: str) -> None:
+        """Propage un changement de filtre de scope (all/system/karel) vers l'UI.
+
+        :param scope: ``"all"``, ``"system"`` ou ``"karel"``.
+        """
+        if self.on_scope_change:
+            self.on_scope_change(scope)
+
     def start_extraction(self) -> None:
+        """Lance l'extraction en arrière-plan (parsing direct des .VA, sans Roboguide)."""
         if self._worker.is_running:
             self._emit_log("Une extraction est déjà en cours.", "warning")
             return
-        if not self.input_dir:
-            self._emit_log("Aucun dossier source sélectionné.", "error")
+        if not self.input_dir or not self.input_dir.is_dir():
+            self._emit_log("Dossier source invalide ou absent.", "error")
             return
 
         self.is_busy = True
         self._emit_status("Extraction en cours…")
+        self._emit_log(f"Démarrage sur : {self.input_dir}", "info")
 
         self._worker.run(
             self._orchestrator.run,
             args=(self.input_dir,),
-            kwargs={"output_dir": self.output_dir, "progress_cb": self._on_progress},
+            kwargs={
+                "output_dir":       self.output_dir,
+                "progress_cb":      self._on_progress,
+                "skip_conversion":  True,
+            },
             on_done=self._on_extraction_done,
             on_error=self._on_extraction_error,
         )
-
-        # Poll toutes les 100 ms depuis le thread principal Tkinter
         self._poll()
 
+    def cancel(self) -> None:
+        """Annule l'extraction en cours (best-effort — interruption propre non garantie)."""
+        if not self._worker.is_running:
+            return
+        self._worker.cancel()
+        self.is_busy = False
+        self._emit_status("Extraction annulée.")
+        self._emit_log("Extraction annulée par l'utilisateur.", "warning")
+
     def export_results(self, output_path: Path, fmt: str = "csv") -> None:
+        """Exporte le dernier résultat d'extraction.
+
+        :param output_path: chemin de destination.
+        :param fmt: ``"csv"``, ``"csv_flat"`` ou ``"json"``.
+        """
         if not self.last_result:
             self._emit_log("Aucun résultat à exporter.", "warning")
             return
         try:
             self._orchestrator.export(self.last_result, output_path, fmt)
-            self._emit_log(f"Export {fmt.upper()} → {output_path}", "info")
+            self._emit_log(f"Export {fmt.upper()} → {output_path}", "success")
         except Exception as exc:
-            self._emit_log(f"Erreur export : {exc}", "error")
-
-    def cancel(self) -> None:
-        # TODO: implémenter l'annulation propre du subprocess Roboguide
-        self._emit_log("Annulation non encore implémentée.", "warning")
+            self._emit_log(f"Export échoué : {exc}", "error")
+            logger.error("Export échoué : %s", exc)
 
     # ------------------------------------------------------------------
-    # Privé
+    # Callbacks internes (thread worker → thread Tkinter via queue)
     # ------------------------------------------------------------------
-
-    def _poll(self) -> None:
-        """Appelé régulièrement via after() pour récupérer le résultat du worker."""
-        import tkinter as tk
-        finished = self._worker.poll_result()
-        if not finished:
-            # Reschedule — nécessite un widget Tk ; on utilise un appel global
-            tk._default_root.after(100, self._poll)  # type: ignore[attr-defined]
 
     def _on_progress(self, current: int, total: int, message: str) -> None:
-        self._emit_log(message, "info")
+        """Remonte la progression depuis le thread worker (thread-safe via queue)."""
         if self.on_progress_change:
             self.on_progress_change(current, total)
+        if message:
+            self._emit_log(message, "info")
 
     def _on_extraction_done(self, result: ExtractionResult) -> None:
+        """Appelé quand l'extraction se termine avec succès."""
         self.last_result = result
-        self.is_busy = False
+        self.is_busy     = False
         msg = (
             f"Extraction terminée — {result.var_count} variable(s), "
-            f"{result.field_count} field(s)."
+            f"{result.field_count} field(s)"
         )
         self._emit_status(msg)
         self._emit_log(msg, "success")
+
+        for err in result.errors:
+            self._emit_log(f"⚠ {err}", "warning")
+
         if self.on_results_ready:
             self.on_results_ready(result)
 
     def _on_extraction_error(self, exc: Exception) -> None:
+        """Appelé quand l'extraction lève une exception non rattrapée."""
         self.is_busy = False
-        self._emit_status("Erreur lors de l'extraction.")
-        self._emit_log(f"Erreur critique : {exc}", "error")
+        msg = f"Erreur inattendue : {exc}"
+        self._emit_status(msg)
+        self._emit_log(msg, "error")
         logger.exception("Erreur extraction", exc_info=exc)
+
+    def _poll(self) -> None:
+        """Interroge la queue du worker toutes les 100 ms depuis le thread Tkinter."""
+        if self._worker.poll_result():
+            return  # worker terminé, on arrête le polling
+        if self._tk_root:
+            self._tk_root.after(100, self._poll)
+
+    # ------------------------------------------------------------------
+    # Helpers d'émission
+    # ------------------------------------------------------------------
 
     def _emit_status(self, msg: str) -> None:
         if self.on_status_change:
             self.on_status_change(msg)
 
     def _emit_log(self, msg: str, level: str = "info") -> None:
+        logger.log(
+            {"info": 20, "success": 20, "warning": 30, "error": 40}.get(level, 20),
+            msg,
+        )
         if self.on_log_message:
             self.on_log_message(msg, level)

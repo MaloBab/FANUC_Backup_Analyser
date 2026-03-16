@@ -1,10 +1,11 @@
 """
-Panneau latéral gauche : sélection du dossier, options, lancement.
+Panneau latéral gauche : sélection du dossier source, filtres, actions.
 """
 
 from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk, filedialog
+from pathlib import Path
 
 from ui.theme import PALETTE, FONTS
 from ui.viewmodel import AppViewModel
@@ -20,11 +21,11 @@ class SidebarPanel(tk.Frame):
         self._build()
 
     # ------------------------------------------------------------------
+    # Construction
+    # ------------------------------------------------------------------
 
     def _build(self) -> None:
-        pad = {"padx": 16, "pady": 6}
-
-        # ── Section : Dossier source ──────────────────────────────────
+        # ── Dossier source ─────────────────────────────────────────────
         self._section_label("DOSSIER SOURCE")
 
         self._input_var = tk.StringVar(value=self._vm.settings.last_input_dir)
@@ -34,29 +35,21 @@ class SidebarPanel(tk.Frame):
             command=self._browse_input,
         )
 
-        # ── Section : Dossier de sortie ───────────────────────────────
-        self._section_label("DOSSIER DE SORTIE  (optionnel)")
-
-        self._output_var = tk.StringVar(value=self._vm.settings.last_output_dir)
-        self._entry_output = self._path_row(
-            self._output_var,
-            placeholder="Dossier temporaire auto",
-            command=self._browse_output,
-        )
-
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=12)
 
-        # ── Section : Filtres ─────────────────────────────────────────
+        # ── Filtres ────────────────────────────────────────────────────
         self._section_label("TYPES DE VARIABLES")
+        self._build_type_filters()
 
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=12)
 
-        # ── Boutons d'action ──────────────────────────────────────────
-        ttk.Button(
+        # ── Actions ────────────────────────────────────────────────────
+        self._btn_start = ttk.Button(
             self, text="▶  Lancer l'extraction",
             style="Accent.TButton",
             command=self._start,
-        ).pack(fill="x", padx=16, pady=(0, 8))
+        )
+        self._btn_start.pack(fill="x", padx=16, pady=(0, 8))
 
         ttk.Button(
             self, text="✕  Annuler",
@@ -66,19 +59,61 @@ class SidebarPanel(tk.Frame):
 
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=12)
 
-        # ── Export ────────────────────────────────────────────────────
+        # ── Export ─────────────────────────────────────────────────────
         self._section_label("EXPORT")
 
         self._export_fmt = tk.StringVar(value="csv")
-        for fmt in ("csv", "json"):
+        for fmt in ("csv", "csv_flat", "json"):
             ttk.Radiobutton(
-                self, text=fmt.upper(), variable=self._export_fmt, value=fmt
+                self, text=fmt.upper(), variable=self._export_fmt, value=fmt,
             ).pack(anchor="w", padx=20, pady=2)
 
         ttk.Button(
             self, text="💾  Exporter",
             command=self._export,
         ).pack(fill="x", padx=16, pady=8)
+
+    def _build_type_filters(self) -> None:
+        """Boutons de filtre Système / Karel exposés au ViewModel."""
+        frame = tk.Frame(self, bg=PALETTE["bg_panel"])
+        frame.pack(fill="x", padx=16)
+
+        self._scope_var = tk.StringVar(value="all")
+
+        filters = [
+            ("all",    "Toutes les variables"),
+            ("system", "Système  [*SYSTEM*]"),
+            ("karel",  "Karel  [NAMESPACE]"),
+        ]
+        for value, label in filters:
+            rb = tk.Radiobutton(
+                frame,
+                text=label,
+                value=value,
+                variable=self._scope_var,
+                bg=PALETTE["bg_panel"],
+                fg=PALETTE["text"],
+                selectcolor=PALETTE["bg_input"],
+                activebackground=PALETTE["bg_panel"],
+                activeforeground=PALETTE["accent"],
+                font=FONTS["body"],
+                command=self._on_scope_change,
+            )
+            rb.pack(anchor="w", pady=2)
+
+        # Légende couleur Karel
+        legend_frame = tk.Frame(frame, bg=PALETTE["bg_panel"])
+        legend_frame.pack(anchor="w", pady=(6, 0))
+        tk.Label(
+            legend_frame, text="■",
+            bg=PALETTE["bg_panel"], fg=PALETTE["warning"],
+            font=FONTS["tag"],
+        ).pack(side="left")
+        tk.Label(
+            legend_frame, text="Variables Karel",
+            bg=PALETTE["bg_panel"], fg=PALETTE["text_dim"],
+            font=FONTS["small"],
+        ).pack(side="left", padx=(4, 0))
 
     # ------------------------------------------------------------------
     # Helpers de construction
@@ -103,25 +138,26 @@ class SidebarPanel(tk.Frame):
         entry = ttk.Entry(frame, textvariable=variable)
         entry.pack(side="left", fill="x", expand=True)
 
-        # Placeholder
         if not variable.get():
             entry.insert(0, placeholder)
             entry.configure(foreground=PALETTE["text_dim"])
 
-            def _clear(e):
+            def _clear(e: tk.Event) -> None:
                 if entry.get() == placeholder:
                     entry.delete(0, "end")
                     entry.configure(foreground=PALETTE["text"])
 
-            def _restore(e):
+            def _restore(e: tk.Event) -> None:
                 if not entry.get():
                     entry.insert(0, placeholder)
                     entry.configure(foreground=PALETTE["text_dim"])
 
-            entry.bind("<FocusIn>", _clear)
+            entry.bind("<FocusIn>",  _clear)
             entry.bind("<FocusOut>", _restore)
 
-        ttk.Button(frame, text="…", width=3, command=command).pack(side="right", padx=(4, 0))
+        ttk.Button(frame, text="…", width=3, command=command).pack(
+            side="right", padx=(4, 0),
+        )
         return entry
 
     # ------------------------------------------------------------------
@@ -134,29 +170,29 @@ class SidebarPanel(tk.Frame):
             self._input_var.set(path)
             self._vm.set_input_dir(path)
 
-    def _browse_output(self) -> None:
-        path = filedialog.askdirectory(title="Sélectionner le dossier de sortie")
-        if path:
-            self._output_var.set(path)
-            self._vm.set_output_dir(path)
-
     def _start(self) -> None:
-        input_path = self._input_var.get()
-        if input_path:
-            self._vm.set_input_dir(input_path)
-        output_path = self._output_var.get()
-        if output_path:
-            self._vm.set_output_dir(output_path)
+        """Valide le dossier source puis lance l'extraction."""
+        raw = self._input_var.get().strip()
+        # Ignorer si la valeur est encore le placeholder
+        if not raw or not Path(raw).is_dir():
+            self._vm._emit_log(  # noqa: SLF001
+                "Veuillez sélectionner un dossier source valide.", "error",
+            )
+            return
+        self._vm.set_input_dir(raw)
         self._vm.start_extraction()
+
+    def _on_scope_change(self) -> None:
+        """Notifie le ViewModel du changement de filtre de scope."""
+        self._vm.set_scope_filter(self._scope_var.get())
 
     def _export(self) -> None:
         fmt = self._export_fmt.get()
-        ext = f".{fmt}"
+        ext = ".csv" if fmt == "csv_flat" else f".{fmt}"
         path = filedialog.asksaveasfilename(
             defaultextension=ext,
             filetypes=[(fmt.upper(), f"*{ext}"), ("Tous", "*.*")],
             title="Enregistrer l'export",
         )
         if path:
-            from pathlib import Path
             self._vm.export_results(Path(path), fmt)

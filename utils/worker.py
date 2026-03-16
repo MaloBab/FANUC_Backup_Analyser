@@ -23,6 +23,7 @@ class BackgroundWorker:
     def __init__(self) -> None:
         self._queue: queue.Queue = queue.Queue()
         self._thread: threading.Thread | None = None
+        self._cancelled: bool = False
 
     @property
     def is_running(self) -> bool:
@@ -40,6 +41,7 @@ class BackgroundWorker:
             raise RuntimeError("Un worker est déjà en cours d'exécution.")
 
         kwargs = kwargs or {}
+        self._cancelled = False
 
         def _target():
             try:
@@ -55,13 +57,23 @@ class BackgroundWorker:
         self._on_done = on_done
         self._on_error = on_error
 
-    def poll_result(self) -> bool:
+    def cancel(self) -> None:
+        """Demande l'arrêt du worker.
+
+        Le thread en cours n'est pas interrompu de force (Python ne le permet pas),
+        mais le résultat sera ignoré : on_done et on_error ne seront pas appelés.
         """
-        À appeler périodiquement depuis la boucle Tkinter (via after()).
-        Retourne True si le worker a terminé.
+        self._cancelled = True
+
+    def poll_result(self) -> bool:
+        """À appeler périodiquement depuis la boucle Tkinter (via after()).
+
+        :returns: True si le worker a terminé (succès, erreur ou annulation).
         """
         try:
             status, payload = self._queue.get_nowait()
+            if self._cancelled:
+                return True  # résultat ignoré
             if status == "done" and self._on_done:
                 self._on_done(payload)
             elif status == "error" and self._on_error:

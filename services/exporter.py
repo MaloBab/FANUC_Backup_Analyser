@@ -25,7 +25,7 @@ class ExportError(Exception):
 
 
 class VariableExporter:
-    """Exporte une liste de ``SystemVariable`` vers CSV (résumé ou flat) ou JSON."""
+    """Exporte une liste de SystemVariable vers CSV (résumé ou flat) ou JSON."""
 
     _SUPPORTED = {"csv", "csv_flat", "json"}
 
@@ -34,7 +34,7 @@ class VariableExporter:
 
         :param variables: liste de variables à exporter.
         :param path: chemin de destination (le dossier parent est créé si absent).
-        :param fmt: ``"csv"``, ``"csv_flat"`` ou ``"json"``.
+        :param fmt: "csv", "csv_flat" ou "json".
         :raises ExportError: si le format n'est pas supporté.
         """
         fmt = fmt.lower()
@@ -79,7 +79,7 @@ class VariableExporter:
         """Une ligne par valeur scalaire — export exhaustif.
 
         Les index multidimensionnels sont répartis sur des colonnes séparées
-        ``index_1``, ``index_2``, … jusqu'à ``_MAX_ND_DIMS`` dimensions.
+        index_1, index_2, … jusqu'à _MAX_ND_DIMS dimensions.
         """
         idx_cols   = [f"index_{k}" for k in range(1, _MAX_ND_DIMS + 1)]
         fieldnames = [
@@ -88,7 +88,7 @@ class VariableExporter:
         ] + idx_cols + ["value"]
 
         def _idx_cells(nd: tuple[int, ...] | None) -> dict[str, str]:
-            """Répartit un index N-D sur les colonnes ``index_1``…``index_N``."""
+            """Répartit un index N-D sur les colonnes index_1…index_N."""
             cells: dict[str, str] = {c: "" for c in idx_cols}
             if nd:
                 for k, v in enumerate(nd, start=1):
@@ -114,8 +114,8 @@ class VariableExporter:
         ) -> None:
             """Écrit une ligne par entrée d'un ArrayValue.
 
-            La clé de chaque item est un tuple d'index (ex: ``(1,)``, ``(2, 3)``).
-            Si ``nd_prefix`` est fourni (index du field parent), il est préfixé aux index.
+            La clé de chaque item est un tuple d'index (ex: (1,), (2, 3)).
+            Si nd_prefix est fourni (index du field parent), il est préfixé aux index.
             """
             for item_key, item_val in array.items.items():
                 nd = (*(nd_prefix or ()), *item_key)

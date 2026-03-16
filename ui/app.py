@@ -5,7 +5,6 @@ Configure la fenêtre principale et instancie les vues.
 
 from __future__ import annotations
 import tkinter as tk
-from tkinter import ttk
 
 from config.settings import Settings
 from ui.theme import apply_theme
@@ -66,7 +65,9 @@ class App:
 
     def _bind_viewmodel(self) -> None:
         """Connecte les événements ViewModel → mise à jour UI."""
+        self._viewmodel.set_tk_root(self._root)
         self._viewmodel.on_status_change = self._statusbar.update_status
         self._viewmodel.on_progress_change = self._statusbar.update_progress
         self._viewmodel.on_results_ready = self._main.display_results
         self._viewmodel.on_log_message = self._main.append_log
+        self._viewmodel.on_scope_change = self._main.set_scope_filter
