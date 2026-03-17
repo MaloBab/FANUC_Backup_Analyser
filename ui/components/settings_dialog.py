@@ -16,7 +16,7 @@ class SettingsDialog(tk.Toplevel):
         self.geometry("500x320")
         self.resizable(False, False)
         self.configure(bg=PALETTE["bg"])
-        self.grab_set()  # Modal
+        self.grab_set()
         self._build()
 
     def _build(self) -> None:
@@ -26,8 +26,7 @@ class SettingsDialog(tk.Toplevel):
                  fg=PALETTE["accent"], font=FONTS["heading"]).pack(anchor="w", padx=20, pady=6)
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=16, pady=4)
 
-        # Exécutable Roboguide
-        tk.Label(self, text="Chemin Roboguide (.exe)",
+        tk.Label(self, text="Chemin Roboguide",
                  bg=PALETTE["bg"], fg=PALETTE["text"], font=FONTS["body"]).pack(anchor="w", padx=20, pady=6)
 
         row = tk.Frame(self, bg=PALETTE["bg"])
@@ -37,7 +36,6 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(row, text="…", width=3,
                    command=self._browse_exe).pack(side="right", padx=(4, 0))
 
-        # Timeout
         tk.Label(self, text="Timeout conversion (secondes)",
                  bg=PALETTE["bg"], fg=PALETTE["text"], font=FONTS["body"]).pack(anchor="w", padx=20, pady=6)
         self._timeout_var = tk.IntVar(value=settings.roboguide_timeout)
@@ -46,7 +44,6 @@ class SettingsDialog(tk.Toplevel):
 
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=16, pady=12)
 
-        # Boutons
         btn_frame = tk.Frame(self, bg=PALETTE["bg"])
         btn_frame.pack(side="bottom", fill="x", padx=16, pady=12)
 

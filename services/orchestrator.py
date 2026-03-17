@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Callable
@@ -25,10 +26,10 @@ ProgressCallback = Callable[[int, int, str], None]
 class ExtractionOrchestrator:
     """Point d'entrée unique pour l'UI.
 
-    En V1 (skip_conversion=True), scanne directement les .VA du dossier
+    En V1 (``skip_conversion=True``), scanne directement les ``.VA`` du dossier
     source sans passer par Roboguide.  Quand la CLI Roboguide sera connue,
-    il suffira de passer skip_conversion=False et de compléter
-    _build_roboguide_command().
+    il suffira de passer ``skip_conversion=False`` et de compléter
+    ``_build_roboguide_command()``.
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -42,17 +43,18 @@ class ExtractionOrchestrator:
         output_dir: Path | None = None,
         progress_cb: ProgressCallback | None = None,
         skip_conversion: bool = True,
+        cancel_event: threading.Event | None = None,
     ) -> ExtractionResult:
         """Lance le pipeline d'extraction.
 
         :param input_dir: dossier à analyser.
         :param output_dir: dossier de sortie optionnel (ignoré en V1).
-        :param progress_cb: callback (current, total, message) pour la progression.
-        :param skip_conversion: si True, parse directement les .VA sans Roboguide.
-        :returns: ExtractionResult avec toutes les variables et les erreurs éventuelles.
+        :param progress_cb: callback ``(current, total, message)`` pour la progression.
+        :param skip_conversion: si ``True``, parse directement les ``.VA`` sans Roboguide.
+        :returns: ``ExtractionResult`` avec toutes les variables et les erreurs éventuelles.
         """
         if skip_conversion:
-            return self._run_direct(input_dir, progress_cb)
+            return self._run_direct(input_dir, progress_cb, cancel_event)
         return self._run_with_conversion(input_dir, output_dir, progress_cb)
 
     def export(self, result: ExtractionResult, output_path: Path, fmt: str = "csv") -> None:
@@ -60,18 +62,17 @@ class ExtractionOrchestrator:
 
         :param result: résultat à exporter.
         :param output_path: chemin de destination.
-        :param fmt: "csv", "csv_flat" ou "json".
+        :param fmt: ``"csv"``, ``"csv_flat"`` ou ``"json"``.
         """
         self._exporter.export(result.variables, output_path, fmt)
 
-    # ------------------------------------------------------------------
-    # Pipelines
-    # ------------------------------------------------------------------
+
 
     def _run_direct(
         self,
         input_dir: Path,
         progress_cb: ProgressCallback | None,
+        cancel_event: threading.Event | None = None,
     ) -> ExtractionResult:
         """Parse directement tous les fichiers .VA du dossier (V1 — sans Roboguide)."""
         va_files = sorted(p for p in input_dir.rglob("*") if p.suffix.lower() == ".va")
@@ -83,6 +84,10 @@ class ExtractionOrchestrator:
 
         result = ExtractionResult(input_dir=input_dir)
         for i, va_path in enumerate(va_files, start=1):
+            if cancel_event and cancel_event.is_set():
+                _notify(progress_cb, i, total, "Extraction annulée.")
+                result.errors.append("Annulé par l'utilisateur.")
+                break
             _notify(progress_cb, i, total, f"Parsing : {va_path.name}")
             try:
                 result.variables.extend(self._parser.parse_file(va_path))
@@ -133,9 +138,7 @@ class ExtractionOrchestrator:
         )
         return result
 
-    # ------------------------------------------------------------------
-    # Conversion (V2 — TODO)
-    # ------------------------------------------------------------------
+    # Conversion (V1 — TODO)
 
     def _convert_directory(
         self,
@@ -187,13 +190,10 @@ class ExtractionOrchestrator:
     @staticmethod
     def _find_convertible_files(directory: Path) -> list[Path]:
         """TODO : ajuster les extensions sources selon le format Roboguide."""
-        extensions = {".ls", ".tp", ".kl"}
+        extensions = {".vr", ".tp", ".sv"}
         return sorted(p for p in directory.rglob("*") if p.suffix.lower() in extensions)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _notify(cb: ProgressCallback | None, cur: int, tot: int, msg: str) -> None:
     if cb:

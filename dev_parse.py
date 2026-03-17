@@ -30,7 +30,7 @@ sys.path = [p for p in sys.path if p != ""]
 from services.parser import VAParser          # noqa: E402
 from services.exporter import VariableExporter  # noqa: E402
 from models.fanuc_models import (              # noqa: E402
-    SystemVariable, ArrayValue, PositionValue, ExtractionResult
+    RobotVariable, ArrayValue, PositionValue, ExtractionResult
 )
 
 
@@ -53,7 +53,7 @@ def _c(text: str, color: str) -> str:
     return f"{color}{text}{RESET}"
 
 
-def print_variable(var: SystemVariable, show_fields: bool = True, max_fields: int = 0) -> None:
+def print_variable(var: RobotVariable, show_fields: bool = True, max_fields: int = 0) -> None:
     """Affiche une variable et ses champs de façon lisible.
 
     :param max_fields: nombre max de fields à afficher (0 = tous)
@@ -104,8 +104,7 @@ def print_summary(result: ExtractionResult, elapsed: float) -> None:
     vars_ = result.variables
 
     scalars    = [v for v in vars_ if not v.fields and isinstance(v.value, str)
-                  and v.value != "Uninitialized"
-                   and v.value != 'Uninitialized']
+                  and v.value != "Uninitialized"]
     prim_arrs  = [v for v in vars_ if not v.fields and isinstance(v.value, ArrayValue)]
     structs    = [v for v in vars_ if v.fields and not v.is_array]
     arr_struct = [v for v in vars_ if v.fields and v.is_array]

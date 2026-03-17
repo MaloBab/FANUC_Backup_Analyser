@@ -10,19 +10,21 @@ from typing import Literal, cast
 
 from ui.theme import PALETTE, FONTS
 from ui.viewmodel import AppViewModel
-from models.fanuc_models import ExtractionResult, SystemVariable, ArrayValue, PositionValue
+from models.fanuc_models import ExtractionResult, RobotVariable, ArrayValue, PositionValue
 from ui.components.detail_dialog import DetailDialog
 
 
 _AnchorT = Literal["nw", "n", "ne", "w", "center", "e", "sw", "s", "se"]
 
+# Mapping niveau de log → couleur
 _LOG_COLORS = {
-    "info":    PALETTE["text"],
+    "info":    PALETTE["info"],
     "success": PALETTE["success"],
     "warning": PALETTE["warning"],
     "error":   PALETTE["error"],
 }
 
+# Colonnes du Treeview : (id, heading, width, anchor)
 _COLUMNS = [
     ("namespace", "NS",       70, "center"),
     ("name",      "Nom",     210, "w"),
@@ -35,7 +37,7 @@ _COLUMNS = [
 ]
 
 
-def _display_value(var: SystemVariable) -> str:
+def _display_value(var: RobotVariable) -> str:
     """Retourne une représentation courte de la valeur d'une variable."""
     if isinstance(var.value, str):
         return var.value
@@ -48,7 +50,7 @@ def _display_value(var: SystemVariable) -> str:
     return ""
 
 
-def _has_detail(var: SystemVariable) -> bool:
+def _has_detail(var: RobotVariable) -> bool:
     """Détermine si une variable mérite d'ouvrir la fenêtre de détail.
 
     Critère : la valeur ne tient pas entièrement dans la colonne Treeview.
@@ -64,7 +66,8 @@ class MainPanel(tk.Frame):
     def __init__(self, parent: tk.Misc, vm: AppViewModel) -> None:
         super().__init__(parent, bg=PALETTE["bg"])
         self._vm = vm
-        self._all_variables: list[SystemVariable] = []
+        self._all_variables:    list[RobotVariable] = []
+        self._filtered_variables: list[RobotVariable] = []
         self._build()
 
 
@@ -81,7 +84,7 @@ class MainPanel(tk.Frame):
         nb.add(results_tab, text="  Résultats  ")
         self._build_results_tab(results_tab)
 
-        # Onglet Journal
+        #Journal
         log_tab = tk.Frame(nb, bg=PALETTE["bg_card"])
         log_tab.rowconfigure(0, weight=1)
         log_tab.columnconfigure(0, weight=1)
@@ -92,6 +95,7 @@ class MainPanel(tk.Frame):
         toolbar = tk.Frame(parent, bg=PALETTE["bg_panel"])
         toolbar.grid(row=0, column=0, sticky="ew")
         self._build_toolbar(toolbar)
+
 
         tree_frame = tk.Frame(parent, bg=PALETTE["bg_card"])
         tree_frame.grid(row=1, column=0, sticky="nsew")
@@ -114,12 +118,10 @@ class MainPanel(tk.Frame):
             )
             self._tree.column(col_id, width=width, anchor=a, minwidth=30)
 
-        # Tags visuels
         self._tree.tag_configure("even",  background=PALETTE["bg_card"])
         self._tree.tag_configure("odd",   background=PALETTE["bg_panel"])
         self._tree.tag_configure("karel", foreground=PALETTE["warning"])
 
-        # Scrollbars
         vsb = ttk.Scrollbar(tree_frame, orient="vertical",   command=self._tree.yview)
         hsb = ttk.Scrollbar(tree_frame, orient="horizontal",  command=self._tree.xview)
         self._tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
@@ -129,19 +131,18 @@ class MainPanel(tk.Frame):
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
 
-        # Compteur
         self._count_var = tk.StringVar(value="0 variable(s)")
         tk.Label(
             parent, textvariable=self._count_var,
             bg=PALETTE["bg_panel"], fg=PALETTE["text_dim"],
-            font=FONTS["small"], anchor="e",  # type: ignore[arg-type]
+            font=FONTS["small"], anchor="e",
         ).grid(row=2, column=0, sticky="ew", padx=8, pady=2)
 
     def _build_toolbar(self, parent: tk.Frame) -> None:
         tk.Label(
             parent, text="Filtrer :",
             bg=PALETTE["bg_panel"], fg=PALETTE["text_dim"],
-            font=FONTS["small"],  # type: ignore[arg-type]
+            font=FONTS["small"],
         ).pack(side="left", padx=(12, 4), pady=8)
 
         self._filter_var = tk.StringVar()
@@ -154,7 +155,6 @@ class MainPanel(tk.Frame):
             command=lambda: self._filter_var.set(""),
         ).pack(side="left", padx=6, pady=8)
 
-        # Filtre par type de variable
         self._scope_var = tk.StringVar(value="all")
         for value, label in (("all", "Tout"), ("system", "Système"), ("karel", "Karel")):
             tk.Radiobutton(
@@ -165,7 +165,7 @@ class MainPanel(tk.Frame):
                 selectcolor=PALETTE["bg_input"],
                 activebackground=PALETTE["bg_panel"],
                 activeforeground=PALETTE["accent"],
-                font=FONTS["body"],  # type: ignore[arg-type]
+                font=FONTS["body"],
                 relief="flat", bd=0,
             ).pack(side="left", padx=4, pady=8)
 
@@ -178,7 +178,7 @@ class MainPanel(tk.Frame):
         self._log_text = tk.Text(
             parent,
             bg=PALETTE["bg_card"], fg=PALETTE["text"],
-            font=FONTS["mono"],  # type: ignore[arg-type]
+            font=FONTS["mono"],
             wrap="none", state="disabled", relief="flat",
             padx=12, pady=8,
         )
@@ -198,9 +198,8 @@ class MainPanel(tk.Frame):
             command=self._clear_log,
         ).pack(side="right", padx=12, pady=4)
 
-    # ------------------------------------------------------------------
-    # Interface publique
-    # ------------------------------------------------------------------
+
+#------------------------------------------------------------------
 
     def display_results(self, result: ExtractionResult) -> None:
         """Remplit le tableau avec les variables extraites."""
@@ -221,9 +220,7 @@ class MainPanel(tk.Frame):
         self._log_text.see("end")
         self._log_text.configure(state="disabled")
 
-    # ------------------------------------------------------------------
-    # Filtrage et affichage
-    # ------------------------------------------------------------------
+#------------------------------------------------------------------
 
     def _apply_filter(self) -> None:
         query = self._filter_var.get().lower()
@@ -231,13 +228,11 @@ class MainPanel(tk.Frame):
 
         filtered = self._all_variables
 
-        # Filtre scope système / Karel
         if scope == "system":
             filtered = [v for v in filtered if v.is_system]
         elif scope == "karel":
             filtered = [v for v in filtered if not v.is_system]
 
-        # Filtre texte : nom, namespace, type, storage, access
         if query:
             filtered = [
                 v for v in filtered
@@ -250,7 +245,8 @@ class MainPanel(tk.Frame):
 
         self._populate_tree(filtered)
 
-    def _populate_tree(self, variables: list[SystemVariable]) -> None:
+    def _populate_tree(self, variables: list[RobotVariable]) -> None:
+        self._filtered_variables = variables
         self._tree.delete(*self._tree.get_children())
         for i, var in enumerate(variables):
             tags: list[str] = ["even" if i % 2 == 0 else "odd"]
@@ -266,7 +262,7 @@ class MainPanel(tk.Frame):
                     var.name,
                     var.storage.value,
                     var.access.value,
-                    var.type_detail.split("=")[0].strip()[:60],
+                    var.type_str[:60],
                     _display_value(var)[:60],
                     len(var.fields) if var.fields else "",
                     var.source_file.name if var.source_file else "",
@@ -281,26 +277,9 @@ class MainPanel(tk.Frame):
         if not item:
             return
         idx = self._tree.index(item)
-        # Retrouver la variable correspondant à la ligne affichée
-        query = self._filter_var.get().lower()
-        scope = self._scope_var.get()
-        filtered = self._all_variables
-        if scope == "system":
-            filtered = [v for v in filtered if v.is_system]
-        elif scope == "karel":
-            filtered = [v for v in filtered if not v.is_system]
-        if query:
-            filtered = [
-                v for v in filtered
-                if query in v.name.lower()
-                or query in v.namespace.lower()
-                or query in v.type_detail.lower()
-                or query in v.storage.value.lower()
-                or query in v.access.value.lower()
-            ]
-        if idx >= len(filtered):
+        if idx >= len(self._filtered_variables):
             return
-        var = filtered[idx]
+        var = self._filtered_variables[idx]
         if _has_detail(var):
             DetailDialog(self, var)
 
@@ -317,7 +296,7 @@ class MainPanel(tk.Frame):
         }
         key_fn = key_map.get(col, lambda v: "")
         rev    = getattr(self, f"_sort_rev_{col}", False)
-        self._all_variables.sort(key=key_fn, reverse=rev)  # type: ignore[arg-type]
+        self._all_variables.sort(key=key_fn, reverse=rev) #type: ignore TODO
         setattr(self, f"_sort_rev_{col}", not rev)
         self._apply_filter()
 

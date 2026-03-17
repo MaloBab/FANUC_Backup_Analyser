@@ -32,9 +32,6 @@ class StatusBar(tk.Frame):
         )
         self._progress.pack(side="right", padx=12, pady=8)
 
-    # ------------------------------------------------------------------
-    # Interface publique
-    # ------------------------------------------------------------------
 
     def update_status(self, message: str) -> None:
         self._status_var.set(message)

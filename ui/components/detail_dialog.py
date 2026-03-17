@@ -14,7 +14,7 @@ from tkinter import ttk
 from typing import Literal, cast
 
 from ui.theme import PALETTE, FONTS
-from models.fanuc_models import SystemVariable, SystemVarField, ArrayValue, PositionValue
+from models.fanuc_models import RobotVariable, SystemVarField, ArrayValue, PositionValue
 
 _AnchorT = Literal["nw", "n", "ne", "w", "center", "e", "sw", "s", "se"]
 
@@ -27,10 +27,8 @@ _COLUMNS: list[tuple[str, str, int, str, bool]] = [
     ("value",  "Valeur", 260, "w",      True),
 ]
 
-# Symboles d'état des enfants
-_ICON_ARRAY    = "▸"   # field tableau développable
-_ICON_POS      = "⊕"   # field position
-_ICON_CHILD    = "  "  # enfant indenté
+_ICON_ARRAY    = "▸"
+_ICON_POS      = "⊕"
 
 
 def _index_str(nd: tuple[int, ...] | None) -> str:
@@ -39,9 +37,6 @@ def _index_str(nd: tuple[int, ...] | None) -> str:
     return "[" + ",".join(str(i) for i in nd) + "]"
 
 
-def _type_pure(raw: str) -> str:
-    """Retire la partie '= valeur' d'un type_detail brut."""
-    return raw.split("=")[0].strip()
 
 
 class DetailDialog(tk.Toplevel):
@@ -50,17 +45,14 @@ class DetailDialog(tk.Toplevel):
     _MIN_W = 880
     _MIN_H = 560
 
-    def __init__(self, parent: tk.Misc, variable: SystemVariable) -> None:
+    def __init__(self, parent: tk.Misc, variable: RobotVariable) -> None:
         super().__init__(parent)
         self._var = variable
-        self._count_var = tk.StringVar()  # initialisé avant _build() car _populate() en dépend
+        self._count_var = tk.StringVar()
         self._setup_window()
         self._build()
         self.focus_set()
 
-    # ------------------------------------------------------------------
-    # Initialisation fenêtre
-    # ------------------------------------------------------------------
 
     def _setup_window(self) -> None:
         v = self._var
@@ -74,9 +66,6 @@ class DetailDialog(tk.Toplevel):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-    # ------------------------------------------------------------------
-    # Construction UI
-    # ------------------------------------------------------------------
 
     def _build(self) -> None:
         self._build_header()
@@ -112,13 +101,13 @@ class DetailDialog(tk.Toplevel):
         pills_row = tk.Frame(header, bg=PALETTE["bg_panel"])
         pills_row.grid(row=1, column=0, sticky="w", padx=20, pady=(0, 12))
 
-        type_str = _type_pure(v.type_detail)
+        type_str = v.type_str
         pill_data: list[tuple[str, str]] = [
             (type_str,       PALETTE["text"]),
-            (v.storage.value,PALETTE["text"]),
-            (v.access.value, PALETTE["text"]),
+            (v.storage.value,PALETTE["text_dim"]),
+            (v.access.value, PALETTE["accent"]),
         ]
-
+        
         if v.array_shape:
             dims = "×".join(str(d) for d in v.array_shape)
             pill_data.append((f"[{dims}]", PALETTE["text_dim"]))
@@ -172,7 +161,6 @@ class DetailDialog(tk.Toplevel):
                                              foreground=PALETTE["text_dim"],
                                              font=FONTS["mono_sm"])
 
-
         vsb = ttk.Scrollbar(outer, orient="vertical",   command=self._tree.yview)
         hsb = ttk.Scrollbar(outer, orient="horizontal", command=self._tree.xview)
         self._tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
@@ -195,7 +183,7 @@ class DetailDialog(tk.Toplevel):
             font=FONTS["small"], anchor="w",
         ).pack(side="left", padx=16, pady=8)
 
-        # Légende
+
         legend_items = [
             (_ICON_ARRAY + " tableau développable", PALETTE["text_dim"]),
             (_ICON_POS   + " position",              PALETTE["info"]),
@@ -260,7 +248,7 @@ class DetailDialog(tk.Toplevel):
                 tags.append("uninit")
             self._tree.insert(
                 "", "end",
-                values=(key_str, "", "", self._var.type_detail.split("=")[0].strip(), val_str),
+                values=(key_str, "", "", self._var.type_str, val_str),
                 tags=tuple(tags),
             )
         n = len(arr.items)
@@ -341,6 +329,7 @@ class DetailDialog(tk.Toplevel):
                     values=("", "", "", "", line),
                     tags=(child_tag,),
                 )
+
 
 
 class _Pill(tk.Label):

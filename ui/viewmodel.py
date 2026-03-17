@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 class AppViewModel:
     """État global de l'application + commandes déclenchables par l'UI.
 
-    Les callbacks ``on_*`` sont branchés par ``App._bind_viewmodel()`` après
-    instanciation. Ils sont tous optionnels (``None`` par défaut) — le ViewModel
+    Les callbacks on_* sont branchés par App._bind_viewmodel() après
+    instanciation. Ils sont tous optionnels (None par défaut) — le ViewModel
     fonctionne sans UI pour les tests.
     """
 
@@ -30,7 +30,7 @@ class AppViewModel:
     on_progress_change: Callable[[int, int], None] | None = None
     on_results_ready:   Callable[[ExtractionResult], None] | None = None
     on_log_message:     Callable[[str, str], None] | None = None  # (msg, level)
-    on_scope_change:    Callable[[str], None] | None = None        # scope filter
+    on_scope_change:    Callable[[str], None] | None = None 
 
     def __init__(self, settings: Settings) -> None:
         self.settings      = settings
@@ -43,36 +43,30 @@ class AppViewModel:
         self.last_result: ExtractionResult | None = None
         self.is_busy:     bool = False
 
-        # Référence Tkinter root — injectée par App pour le polling after()
         self._tk_root = None
 
-    # ------------------------------------------------------------------
-    # Injection (appelée par App)
-    # ------------------------------------------------------------------
 
     def set_tk_root(self, root) -> None:
         """Injecte la référence à la fenêtre Tkinter racine pour le polling."""
         self._tk_root = root
 
-    # ------------------------------------------------------------------
-    # Commandes (appelées par l'UI)
-    # ------------------------------------------------------------------
+
 
     def set_input_dir(self, path: str) -> None:
         """Met à jour le dossier source et persiste dans les settings."""
-        self.input_dir             = Path(path)
+        self.input_dir = Path(path)
         self.settings.last_input_dir = path
         self._emit_status(f"Dossier source : {path}")
 
     def set_output_dir(self, path: str) -> None:
         """Met à jour le dossier de sortie et persiste dans les settings."""
-        self.output_dir              = Path(path)
+        self.output_dir = Path(path)
         self.settings.last_output_dir = path
 
     def set_scope_filter(self, scope: str) -> None:
         """Propage un changement de filtre de scope (all/system/karel) vers l'UI.
 
-        :param scope: ``"all"``, ``"system"`` ou ``"karel"``.
+        :param scope: "all", "system" ou "karel".
         """
         if self.on_scope_change:
             self.on_scope_change(scope)
@@ -94,9 +88,10 @@ class AppViewModel:
             self._orchestrator.run,
             args=(self.input_dir,),
             kwargs={
-                "output_dir":       self.output_dir,
-                "progress_cb":      self._on_progress,
-                "skip_conversion":  True,
+                "output_dir":      self.output_dir,
+                "progress_cb":     self._on_progress,
+                "skip_conversion": True,
+                "cancel_event":    self._worker.cancel_event,
             },
             on_done=self._on_extraction_done,
             on_error=self._on_extraction_error,
@@ -116,7 +111,7 @@ class AppViewModel:
         """Exporte le dernier résultat d'extraction.
 
         :param output_path: chemin de destination.
-        :param fmt: ``"csv"``, ``"csv_flat"`` ou ``"json"``.
+        :param fmt: "csv", "csv_flat" ou "json".
         """
         if not self.last_result:
             self._emit_log("Aucun résultat à exporter.", "warning")
@@ -128,9 +123,6 @@ class AppViewModel:
             self._emit_log(f"Export échoué : {exc}", "error")
             logger.error("Export échoué : %s", exc)
 
-    # ------------------------------------------------------------------
-    # Callbacks internes (thread worker → thread Tkinter via queue)
-    # ------------------------------------------------------------------
 
     def _on_progress(self, current: int, total: int, message: str) -> None:
         """Remonte la progression depuis le thread worker (thread-safe via queue)."""
@@ -167,13 +159,10 @@ class AppViewModel:
     def _poll(self) -> None:
         """Interroge la queue du worker toutes les 100 ms depuis le thread Tkinter."""
         if self._worker.poll_result():
-            return  # worker terminé, on arrête le polling
+            return
         if self._tk_root:
             self._tk_root.after(100, self._poll)
 
-    # ------------------------------------------------------------------
-    # Helpers d'émission
-    # ------------------------------------------------------------------
 
     def _emit_status(self, msg: str) -> None:
         if self.on_status_change:

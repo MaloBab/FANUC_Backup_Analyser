@@ -17,12 +17,10 @@ class HeaderBar(tk.Frame):
         self._vm = vm
         self.pack_propagate(False)
         self._build()
-        # Trait ambre en bas du header
         self._accent_line = tk.Frame(self, bg=PALETTE["accent"], height=2)
         self._accent_line.pack(side="bottom", fill="x")
 
     def _build(self) -> None:
-        # Logo + titre
         logo_frame = tk.Frame(self, bg=PALETTE["bg_panel"])
         logo_frame.pack(side="left", padx=(18, 0))
 
@@ -44,14 +42,12 @@ class HeaderBar(tk.Frame):
             font=("Segoe UI", 10),
         ).pack(side="left")
 
-        # Version
         tk.Label(
             self, text="v1.0",
             bg=PALETTE["bg_panel"], fg=PALETTE["text_muted"],
             font=FONTS["tag"],
         ).pack(side="left", padx=12)
 
-        # Bouton paramètres
         ttk.Button(
             self, text="⚙  Paramètres",
             style="Ghost.TButton",

@@ -20,12 +20,8 @@ class SidebarPanel(tk.Frame):
         self._vm = vm
         self._build()
 
-    # ------------------------------------------------------------------
-    # Construction
-    # ------------------------------------------------------------------
-
     def _build(self) -> None:
-        # ── Dossier source ─────────────────────────────────────────────
+
         self._section_label("DOSSIER SOURCE")
 
         self._input_var = tk.StringVar(value=self._vm.settings.last_input_dir)
@@ -37,13 +33,11 @@ class SidebarPanel(tk.Frame):
 
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=12)
 
-        # ── Filtres ────────────────────────────────────────────────────
         self._section_label("TYPES DE VARIABLES")
         self._build_type_filters()
 
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=12)
 
-        # ── Actions ────────────────────────────────────────────────────
         self._btn_start = ttk.Button(
             self, text="▶  Lancer l'extraction",
             style="Accent.TButton",
@@ -59,7 +53,6 @@ class SidebarPanel(tk.Frame):
 
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=12)
 
-        # ── Export ─────────────────────────────────────────────────────
         self._section_label("EXPORT")
 
         self._export_fmt = tk.StringVar(value="csv")
@@ -101,7 +94,6 @@ class SidebarPanel(tk.Frame):
             )
             rb.pack(anchor="w", pady=2)
 
-        # Légende couleur Karel
         legend_frame = tk.Frame(frame, bg=PALETTE["bg_panel"])
         legend_frame.pack(anchor="w", pady=(6, 0))
         tk.Label(
@@ -115,9 +107,6 @@ class SidebarPanel(tk.Frame):
             font=FONTS["small"],
         ).pack(side="left", padx=(4, 0))
 
-    # ------------------------------------------------------------------
-    # Helpers de construction
-    # ------------------------------------------------------------------
 
     def _section_label(self, text: str) -> None:
         tk.Label(
@@ -160,9 +149,6 @@ class SidebarPanel(tk.Frame):
         )
         return entry
 
-    # ------------------------------------------------------------------
-    # Commandes
-    # ------------------------------------------------------------------
 
     def _browse_input(self) -> None:
         path = filedialog.askdirectory(title="Sélectionner le dossier source")
@@ -173,9 +159,8 @@ class SidebarPanel(tk.Frame):
     def _start(self) -> None:
         """Valide le dossier source puis lance l'extraction."""
         raw = self._input_var.get().strip()
-        # Ignorer si la valeur est encore le placeholder
         if not raw or not Path(raw).is_dir():
-            self._vm._emit_log(  # noqa: SLF001
+            self._vm._emit_log(
                 "Veuillez sélectionner un dossier source valide.", "error",
             )
             return

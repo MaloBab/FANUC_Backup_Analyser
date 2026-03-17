@@ -8,23 +8,20 @@ import tkinter as tk
 from tkinter import ttk
 
 
-# ---------------------------------------------------------------------------
-# Palette  — dark industrial, accents amber
-# ---------------------------------------------------------------------------
 
 PALETTE = {
     # Fonds
-    "bg":           "#0f1117",   # fond principal très sombre
-    "bg_panel":     "#161b24",   # panneaux latéraux
-    "bg_card":      "#1c2233",   # cartes / treeview
-    "bg_input":     "#232d3f",   # champs de saisie
-    "bg_hover":     "#2a3650",   # survol
-    "bg_selected":  "#1a3a5c",   # sélection
+    "bg":           "#0f1117",
+    "bg_panel":     "#161b24",
+    "bg_card":      "#1c2233",
+    "bg_input":     "#232d3f", 
+    "bg_hover":     "#2a3650",
+    "bg_selected":  "#1a3a5c", 
     # Accents
-    "accent":       "#f59e0b",   # ambre — actions principales
-    "accent_dim":   "#92650a",   # ambre atténué
-    "accent_hover": "#fbbf24",   # ambre survol
-    "accent_text":  "#0f1117",   # texte sur fond ambre
+    "accent":       "#f1f50b",  
+    "accent_dim":   "#8e920a",   
+    "accent_hover": "#fbf724",   
+    "accent_text":  "#0f1117",  
     # Sémantique
     "success":      "#10b981",
     "warning":      "#f59e0b",
@@ -34,12 +31,12 @@ PALETTE = {
     "text":         "#e2e8f0",
     "text_dim":     "#64748b",
     "text_muted":   "#334155",
-    # Frontières
+    # Border
     "border":       "#1e293b",
     "border_bright":"#334155",
     "separator":    "#1e293b",
     # Tags spéciaux
-    "karel_fg":     "#f59e0b",
+    "karel_fg":     "#464646",
     "uninit_fg":    "#ef4444",
     "system_fg":    "#3b82f6",
 }
@@ -67,12 +64,11 @@ def _configure_ttk_styles() -> None:
     style.theme_use("clam")
     P = PALETTE
 
-    # ── Frames ────────────────────────────────────────────────────────
     style.configure("TFrame",       background=P["bg"])
     style.configure("Panel.TFrame", background=P["bg_panel"])
     style.configure("Card.TFrame",  background=P["bg_card"])
 
-    # ── Labels ────────────────────────────────────────────────────────
+
     style.configure("TLabel",
                     background=P["bg"], foreground=P["text"],
                     font=FONTS["body"])
@@ -95,7 +91,7 @@ def _configure_ttk_styles() -> None:
                     background=P["bg_input"], foreground=P["text_dim"],
                     font=FONTS["tag"], padding=(4, 2))
 
-    # ── Boutons ───────────────────────────────────────────────────────
+
     style.configure("TButton",
                     background=P["bg_input"], foreground=P["text"],
                     relief="flat", padding=(12, 6),
@@ -128,7 +124,7 @@ def _configure_ttk_styles() -> None:
               background=[("active", P["bg_input"])],
               foreground=[("active", P["text"])])
 
-    # ── Entry ─────────────────────────────────────────────────────────
+
     style.configure("TEntry",
                     fieldbackground=P["bg_input"],
                     foreground=P["text"],
@@ -137,7 +133,7 @@ def _configure_ttk_styles() -> None:
                     selectbackground=P["bg_selected"],
                     relief="flat", padding=(6, 4))
 
-    # ── Treeview ──────────────────────────────────────────────────────
+
     style.configure("Treeview",
                     background=P["bg_card"],
                     fieldbackground=P["bg_card"],
@@ -159,7 +155,7 @@ def _configure_ttk_styles() -> None:
               background=[("active", P["bg_hover"])],
               foreground=[("active", P["text"])])
 
-    # ── Scrollbar ─────────────────────────────────────────────────────
+
     style.configure("TScrollbar",
                     background=P["bg_panel"],
                     troughcolor=P["bg"],
@@ -169,14 +165,13 @@ def _configure_ttk_styles() -> None:
     style.map("TScrollbar",
               background=[("active", P["bg_input"])])
 
-    # ── Progressbar ───────────────────────────────────────────────────
+
     style.configure("TProgressbar",
                     background=P["accent"],
                     troughcolor=P["bg_input"],
                     bordercolor=P["bg_input"],
                     thickness=3)
 
-    # ── Notebook ──────────────────────────────────────────────────────
     style.configure("TNotebook",
                     background=P["bg_panel"],
                     bordercolor=P["border"],
@@ -191,7 +186,7 @@ def _configure_ttk_styles() -> None:
               foreground=[("selected", P["text"])],
               expand=[("selected", (0, 0, 0, 0))])
 
-    # ── Separator / Radiobutton ────────────────────────────────────────
+
     style.configure("TSeparator",   background=P["separator"])
     style.configure("TRadiobutton",
                     background=P["bg_panel"], foreground=P["text"],

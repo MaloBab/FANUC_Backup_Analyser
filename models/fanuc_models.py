@@ -1,11 +1,11 @@
 """
 Modèles de données — représentations fidèles de la structure des fichiers .VA FANUC.
 
-Convention sur FieldValue :
-  - str          : valeur scalaire normalisée (y compris "Uninitialized")
-  - ArrayValue   : tableau indexé de valeurs scalaires
-  - PositionValue: position cartésienne/articulaire multilignes
-  - None         : absence de valeur (variable non encore parsée ou sans bloc de valeur)
+Convention sur ``FieldValue`` :
+  - ``str``          : valeur scalaire normalisée (y compris ``"Uninitialized"``)
+  - ``ArrayValue``   : tableau indexé de valeurs scalaires
+  - ``PositionValue``: position cartésienne/articulaire multilignes
+  - ``None``         : absence de valeur (variable non encore parsée ou sans bloc de valeur)
 """
 
 from __future__ import annotations
@@ -68,39 +68,39 @@ FieldValue  = ScalarValue | ArrayValue | PositionValue
 class SystemVarField:
     """Champ d'une variable structurée ou tableau de structs FANUC.
 
-    parent_index_nd encode l'index parent sous forme de tuple :
-      - None   : le field n'appartient pas à un élément de tableau (struct simple)
-      - (i,)   : tableau 1D, élément i
-      - (i, j) : tableau 2D, élément [i, j]
+    ``parent_index_nd`` encode l'index parent sous forme de tuple :
+      - ``None``   : le field n'appartient pas à un élément de tableau (struct simple)
+      - ``(i,)``   : tableau 1D, élément ``i``
+      - ``(i, j)`` : tableau 2D, élément ``[i, j]``
       - etc.
     """
 
     full_name:       str                        # nom complet tel qu'il apparaît dans le .VA
-    parent_var:      str                        # variable parente (ex: "$AP_CUREQ", "NFPAM.TBC")
-    field_name:      str                        # nom du field seul (ex: "$PANE_EQNO", "CNT_SCALE")
+    parent_var:      str                        # variable parente (ex: ``"$AP_CUREQ"``, ``"NFPAM.TBC"``)
+    field_name:      str                        # nom du field seul (ex: ``"$PANE_EQNO"``, ``"CNT_SCALE"``)
     access:          AccessType
     data_type:       VADataType
-    type_detail:     str                        # type brut (ex: "SHORT", "ARRAY[9] OF BYTE")
+    type_detail:     str                        # type brut (ex: ``"SHORT"``, ``"ARRAY[9] OF BYTE"``)
     value:           FieldValue
     parent_index_nd: tuple[int, ...] | None = None
 
     @property
     def parent_index(self) -> int | None:
-        """Premier index du parent (rétrocompat). None si struct simple."""
+        """Premier index du parent (rétrocompat). ``None`` si struct simple."""
         return self.parent_index_nd[0] if self.parent_index_nd else None
 
 
 @dataclass
-class SystemVariable:
+class RobotVariable:
     """Variable système ou Karel extraite d'un fichier .VA FANUC.
 
-    array_size  : produit total des dimensions (ex: 4×200 = 800).
-    array_shape : dimensions exactes sous forme de tuple (ex: (4, 200)).
-                      None pour les tableaux 1D (la taille suffit) et les scalaires.
+    ``array_size``  : produit total des dimensions (ex: 4×200 = 800).
+    ``array_shape`` : dimensions exactes sous forme de tuple (ex: ``(4, 200)``).
+                      ``None`` pour les tableaux 1D (la taille suffit) et les scalaires.
     """
 
     name:        str
-    namespace:   str                             # contenu entre crochets (ex: "*SYSTEM*", "TBSWMD45")
+    namespace:   str                             # contenu entre crochets (ex: ``"*SYSTEM*"``, ``"TBSWMD45"``)
     storage:     StorageType
     access:      AccessType
     data_type:   VADataType
@@ -114,13 +114,21 @@ class SystemVariable:
     line_number: int | None = None
 
     @property
+    def type_str(self) -> str:
+        """Type pur sans valeur inline (ex: 'INTEGER = 0' → 'INTEGER').
+
+        Utilisé partout où le type_detail doit être affiché sans sa valeur.
+        """
+        return self.type_detail.split("=")[0].strip()
+
+    @property
     def is_system(self) -> bool:
-        """True si la variable appartient au namespace *SYSTEM*."""
+        """``True`` si la variable appartient au namespace ``*SYSTEM*``."""
         return self.namespace == "*SYSTEM*"
 
     @property
     def is_struct(self) -> bool:
-        """True si la variable possède des fields."""
+        """``True`` si la variable possède des fields."""
         return bool(self.fields)
 
     def to_dict(self) -> dict:
@@ -145,7 +153,7 @@ class ExtractionResult:
     """Résultat agrégé d'une extraction sur un fichier ou un dossier."""
 
     input_dir:  Path
-    variables:  list[SystemVariable] = field(default_factory=list)
+    variables:  list[RobotVariable] = field(default_factory=list)
     errors:     list[str] = field(default_factory=list)
 
     @property
@@ -157,9 +165,6 @@ class ExtractionResult:
         return sum(len(v.fields) for v in self.variables)
 
 
-# ---------------------------------------------------------------------------
-# Modèles de conversion
-# ---------------------------------------------------------------------------
 
 class ConversionStatus(Enum):
     PENDING = "PENDING"
@@ -177,9 +182,6 @@ class ConversionResult:
     duration_s:    float | None = None
 
 
-# ---------------------------------------------------------------------------
-# Sérialiseurs (utilisés par to_dict et l'exporter)
-# ---------------------------------------------------------------------------
 
 def _serialize_value(value: FieldValue) -> object:
     if value is None:

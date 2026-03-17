@@ -24,7 +24,7 @@ import logging
 from pathlib import Path
 
 from models.fanuc_models import (
-    SystemVariable, SystemVarField,
+    RobotVariable, SystemVarField,
     StorageType, AccessType, VADataType,
     ArrayValue, PositionValue,
     ExtractionResult,
@@ -33,14 +33,12 @@ from models.fanuc_models import (
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Regex
-# ---------------------------------------------------------------------------
 
-# En-tête unifié : [NAMESPACE]NOM  Storage: X  Access: Y  : <type_spec>
+
+# header : [NAMESPACE]NOM  Storage: X  Access: Y  : <type_spec>
 # Couvre *SYSTEM* et tout namespace Karel (TBSWMD45, etc.)
 _RE_VAR_HEADER = re.compile(
-    r"^\[([^\]]+)\]"                 # [namespace]  (tout sauf ])
+    r"^\[([^\]]+)\]"                 # [namespace] capturé sans les crochets
     r"(\$?[\w.]+)"                   # nom (optionnellement préfixé $, peut contenir des points)
     r"\s+Storage:\s*(\w+)"           # storage
     r"\s+Access:\s*(\w+)"            # access
@@ -90,9 +88,6 @@ _RE_POSITION_LINE = re.compile(r"^\s*(Group:|Config:|X:|Y:|Z:|W:|P:|R:|\[)")
 _RE_FIELD_SPLIT = re.compile(r"^([\w.\$]+?)(\[[\d,]+\])?\.([\$\w]+)$")
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _parse_access(raw: str) -> AccessType:
     """Convertit une chaîne brute en AccessType.
@@ -207,25 +202,25 @@ def _parse_array_dims(type_spec: str) -> tuple[tuple[int, ...], int, str]:
     return dims, size, m.group(1)
 
 
-# ---------------------------------------------------------------------------
+# ------------------------
 # Parser principal
-# ---------------------------------------------------------------------------
+# ------------------------
 
 class VAParser:
-    """Parse les fichiers .VA FANUC et retourne une liste de SystemVariable.
+    """Parse les fichiers .VA FANUC et retourne une liste de RobotVariable.
 
     Supporte les variables système ([*SYSTEM*]) et les variables Karel
     ([NAMESPACE]) dans un format unifié. Implémente un automate ligne
     par ligne sans regex multilignes.
     """
 
-    def parse_file(self, va_path: Path) -> list[SystemVariable]:
-        """Parse un fichier .VA FANUC et retourne la liste de toutes ses variables.
+    def parse_file(self, va_path: Path) -> list[RobotVariable]:
+        """Parse un fichier .VA et retourne la liste de toutes ses variables.
 
         Le fichier est lu en UTF-8 avec remplacement des octets invalides.
 
         :param va_path: chemin vers le fichier .VA à lire.
-        :returns: liste de SystemVariable dans l'ordre d'apparition.
+        :returns: liste de RobotVariable dans l'ordre d'apparition.
                   Retourne une liste vide si le fichier est introuvable ou illisible.
         """
         if not va_path.exists():
@@ -238,7 +233,7 @@ class VAParser:
             return []
 
         lines = text.splitlines()
-        variables: list[SystemVariable] = []
+        variables: list[RobotVariable] = []
         i = 0
         n = len(lines)
         while i < n:
@@ -261,7 +256,7 @@ class VAParser:
         Les erreurs sur un fichier individuel sont consignées dans ExtractionResult.errors
         sans interrompre le traitement des fichiers suivants.
 
-        :param directory: dossier racine à parcourir récursivement.
+        :param directory: dossier racine à parcourir.
         :returns: ExtractionResult agrégeant toutes les variables et les erreurs.
         """
         result = ExtractionResult(input_dir=directory)
@@ -276,9 +271,7 @@ class VAParser:
                 result.errors.append(f"{va_file.name}: {exc}")
         return result
 
-    # ------------------------------------------------------------------
-    # Automate interne
-    # ------------------------------------------------------------------
+
 
     def _parse_variable(
         self,
@@ -286,16 +279,15 @@ class VAParser:
         lines: list[str],
         start: int,
         source: Path,
-    ) -> tuple[SystemVariable | None, int]:
+    ) -> tuple[RobotVariable | None, int]:
         """Parse une variable complète depuis son en-tête jusqu'au début de la suivante.
 
         Implémente un automate à états qui consomme les lignes suivant l'en-tête
-        pour reconstituer la valeur ou les fields. Gère les 8 cas documentés dans
-        le module.
+        pour reconstituer la valeur ou les fields. Gère les 8 cas identifiés.
 
         :param header_match: résultat de _RE_VAR_HEADER.match() sur la ligne d'en-tête.
         :param lines: liste complète des lignes du fichier.
-        :param start: index (0-based) de la ligne d'en-tête.
+        :param start: index de la ligne d'en-tête.
         :param source: chemin du fichier source.
         :returns: tuple (variable, next_index) — next_index est la prochaine
                   ligne à traiter par la boucle principale.
@@ -319,7 +311,7 @@ class VAParser:
             inner_type  = m_sc.group(1) if m_sc else type_spec
             data_type   = _parse_datatype(inner_type)
 
-        var = SystemVariable(
+        var = RobotVariable(
             name        = name,
             namespace   = namespace,
             storage     = storage,
@@ -334,12 +326,10 @@ class VAParser:
             line_number = start + 1,
         )
 
-        # Valeur scalaire inline sur l'en-tête
         if not is_array and "=" in type_spec:
             raw_val   = type_spec.split("=", 1)[1].strip()
             var.value = _scalar_value(raw_val)
 
-        # Lecture des lignes suivantes
         i             = start + 1
         current_array : ArrayValue | None = None
 
@@ -355,7 +345,6 @@ class VAParser:
                 i += 1
                 continue
 
-            # -- Field POSITION (multilignes) --
             m = _RE_FIELD_POSITION.match(stripped)
             if m:
                 f = self._make_field_position(m)
@@ -372,7 +361,6 @@ class VAParser:
                 current_array = None
                 continue
 
-            # -- Field tableau (sans Access:) --
             m = _RE_FIELD_ARRAY.match(stripped)
             if m:
                 f = self._make_field_array(m)
@@ -418,9 +406,6 @@ class VAParser:
 
         return var, i
 
-    # ------------------------------------------------------------------
-    # Constructeurs de fields
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _make_field_scalar(m: re.Match) -> SystemVarField:
@@ -446,7 +431,7 @@ class VAParser:
     def _make_field_array(m: re.Match) -> SystemVarField:
         """Construit un SystemVarField tableau depuis un match de _RE_FIELD_ARRAY.
 
-        La valeur est initialisée à un ArrayValue vide peuplé ensuite par la boucle.
+        La valeur est initialisée à un ArrayValue vide peuplé ensuite.
 
         :param m: groupes attendus : (full_name, array_spec).
         :returns: SystemVarField avec value = ArrayValue() vide.

@@ -12,12 +12,12 @@ import json
 import logging
 from pathlib import Path
 
-from models.fanuc_models import SystemVariable, SystemVarField, ArrayValue, _serialize_value
+from models.fanuc_models import RobotVariable, SystemVarField, ArrayValue, _serialize_value
 
 logger = logging.getLogger(__name__)
 
-# Nombre max de dimensions d'index supportées dans le CSV flat
-_MAX_ND_DIMS = 4
+
+_MAX_ND_DIMS = 7
 
 
 class ExportError(Exception):
@@ -25,11 +25,11 @@ class ExportError(Exception):
 
 
 class VariableExporter:
-    """Exporte une liste de SystemVariable vers CSV (résumé ou flat) ou JSON."""
+    """Exporte une liste de RobotVariable vers CSV (résumé ou flat) ou JSON."""
 
     _SUPPORTED = {"csv", "csv_flat", "json"}
 
-    def export(self, variables: list[SystemVariable], path: Path, fmt: str = "csv") -> None:
+    def export(self, variables: list[RobotVariable], path: Path, fmt: str = "csv") -> None:
         """Exporte les variables vers le fichier indiqué dans le format demandé.
 
         :param variables: liste de variables à exporter.
@@ -45,12 +45,9 @@ class VariableExporter:
         dispatch[fmt](variables, path)
         logger.info("Export %s → %s (%d vars)", fmt.upper(), path, len(variables))
 
-    # ------------------------------------------------------------------
-    # Formats
-    # ------------------------------------------------------------------
 
     @staticmethod
-    def _csv_summary(variables: list[SystemVariable], path: Path) -> None:
+    def _csv_summary(variables: list[RobotVariable], path: Path) -> None:
         """Une ligne par variable — résumé."""
         fieldnames = [
             "namespace", "name", "storage", "access",
@@ -75,7 +72,7 @@ class VariableExporter:
                 })
 
     @staticmethod
-    def _csv_flat(variables: list[SystemVariable], path: Path) -> None:
+    def _csv_flat(variables: list[RobotVariable], path: Path) -> None:
         """Une ligne par valeur scalaire — export exhaustif.
 
         Les index multidimensionnels sont répartis sur des colonnes séparées
@@ -96,7 +93,7 @@ class VariableExporter:
                         cells[f"index_{k}"] = str(v)
             return cells
 
-        def _base(var: SystemVariable) -> dict:
+        def _base(var: RobotVariable) -> dict:
             return {
                 "namespace": var.namespace,
                 "variable":  var.name,
@@ -159,7 +156,7 @@ class VariableExporter:
                         _write_field(w, base, fld)
 
     @staticmethod
-    def _json(variables: list[SystemVariable], path: Path) -> None:
+    def _json(variables: list[RobotVariable], path: Path) -> None:
         """Structure complète en JSON indenté."""
         path.write_text(
             json.dumps([v.to_dict() for v in variables], indent=2, ensure_ascii=False),

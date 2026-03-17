@@ -17,8 +17,8 @@ from ui.viewmodel import AppViewModel
 
 class App:
     """
-    Classe racine : crée la fenêtre, injecte le ViewModel dans chaque composant.
-    Pattern MVVM léger : ViewModel ↔ Composants UI.
+    Crée la fenêtre, injecte le ViewModel dans chaque composant.
+    Pattern MVVM : ViewModel ↔ Composants UI.
     """
 
     def __init__(self, root: tk.Tk, settings: Settings) -> None:
@@ -31,7 +31,7 @@ class App:
         self._build_layout()
         self._bind_viewmodel()
 
-    # ------------------------------------------------------------------
+
 
     def _configure_root(self) -> None:
         self._root.title(self._settings.window_title)
@@ -43,11 +43,9 @@ class App:
     def _build_layout(self) -> None:
         vm = self._viewmodel
 
-        # Barre de titre / actions globales
         self._header = HeaderBar(self._root, vm)
         self._header.grid(row=0, column=0, sticky="ew")
 
-        # Zone centrale : sidebar + panel principal
         center = tk.Frame(self._root)
         center.grid(row=1, column=0, sticky="nsew")
         center.columnconfigure(1, weight=1)
@@ -59,7 +57,6 @@ class App:
         self._main = MainPanel(center, vm)
         self._main.grid(row=0, column=1, sticky="nsew")
 
-        # Barre de statut
         self._statusbar = StatusBar(self._root, vm)
         self._statusbar.grid(row=2, column=0, sticky="ew")
 
