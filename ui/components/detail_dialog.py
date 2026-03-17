@@ -105,7 +105,7 @@ class DetailDialog(tk.Toplevel):
         pill_data: list[tuple[str, str]] = [
             (type_str,       PALETTE["text"]),
             (v.storage.value,PALETTE["text_dim"]),
-            (v.access.value, PALETTE["accent"]),
+            (v.access.value, PALETTE["text_dim"]),
         ]
         
         if v.array_shape:
