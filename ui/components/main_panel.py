@@ -6,7 +6,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 from datetime import datetime
-from typing import Literal, cast
+from typing import Literal, cast, Callable
 
 from ui.theme import PALETTE, FONTS
 from ui.viewmodel import AppViewModel
@@ -36,6 +36,7 @@ _COLUMNS = [
     ("source",    "Fichier", 140, "w"),
 ]
 
+_SortKey = Callable[[RobotVariable], str | int]
 
 def _display_value(var: RobotVariable) -> str:
     """Retourne une représentation courte de la valeur d'une variable."""
@@ -284,7 +285,7 @@ class MainPanel(tk.Frame):
             DetailDialog(self, var)
 
     def _sort_tree(self, col: str) -> None:
-        key_map: dict[str, object] = {
+        key_map: dict[str, _SortKey] = {
             "namespace": lambda v: v.namespace.lower(),
             "name":      lambda v: v.name.lower(),
             "storage":   lambda v: v.storage.value,
@@ -294,9 +295,10 @@ class MainPanel(tk.Frame):
             "fields":    lambda v: len(v.fields),
             "source":    lambda v: str(v.source_file or "").lower(),
         }
-        key_fn = key_map.get(col, lambda v: "")
+        default: _SortKey = lambda v: ""
+        key_fn = key_map.get(col, default)
         rev    = getattr(self, f"_sort_rev_{col}", False)
-        self._all_variables.sort(key=key_fn, reverse=rev) #type: ignore TODO
+        self._all_variables.sort(key=key_fn, reverse=rev)
         setattr(self, f"_sort_rev_{col}", not rev)
         self._apply_filter()
 
