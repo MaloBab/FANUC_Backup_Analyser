@@ -33,8 +33,7 @@ class SidebarPanel(tk.Frame):
 
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=12)
 
-        self._section_label("TYPES DE VARIABLES")
-        self._build_type_filters()
+        self._build_type_legend()
 
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=12)
 
@@ -66,46 +65,43 @@ class SidebarPanel(tk.Frame):
             command=self._export,
         ).pack(fill="x", padx=16, pady=8)
 
-    def _build_type_filters(self) -> None:
-        """Boutons de filtre Système / Karel exposés au ViewModel."""
+    def _build_type_legend(self) -> None:
+        """légende des types de variables."""
         frame = tk.Frame(self, bg=PALETTE["bg_panel"])
         frame.pack(fill="x", padx=16)
 
-        self._scope_var = tk.StringVar(value="all")
-
-        filters = [
-            ("all",    "Toutes les variables"),
-            ("system", "Système  [*SYSTEM*]"),
-            ("karel",  "Karel  [NAMESPACE]"),
-        ]
-        for value, label in filters:
-            rb = tk.Radiobutton(
-                frame,
-                text=label,
-                value=value,
-                variable=self._scope_var,
-                bg=PALETTE["bg_panel"],
-                fg=PALETTE["text"],
-                selectcolor=PALETTE["bg_input"],
-                activebackground=PALETTE["bg_panel"],
-                activeforeground=PALETTE["accent"],
-                font=FONTS["body"],
-                command=self._on_scope_change,
-            )
-            rb.pack(anchor="w", pady=2)
-
         legend_frame = tk.Frame(frame, bg=PALETTE["bg_panel"])
-        legend_frame.pack(anchor="w", pady=(6, 0))
+        legend_frame.pack(anchor="w", pady=(6, 0), fill="x")
+        
+        # Légende Système
+        system_row = tk.Frame(legend_frame, bg=PALETTE["bg_panel"])
+        system_row.pack(anchor="w", pady=2)
         tk.Label(
-            legend_frame, text="■",
+            system_row, text="■",
+            bg=PALETTE["bg_panel"], fg=PALETTE["text"],
+            font=FONTS["tag"],
+        ).pack(side="left")
+        tk.Label(
+            system_row, text="Variables Système",
+            bg=PALETTE["bg_panel"], fg=PALETTE["text_dim"],
+            font=FONTS["small"],
+        ).pack(side="left", padx=(4, 0))
+        
+        
+        # Légende Karel
+        karel_row = tk.Frame(legend_frame, bg=PALETTE["bg_panel"])
+        karel_row.pack(anchor="w", pady=2)
+        tk.Label(
+            karel_row, text="■",
             bg=PALETTE["bg_panel"], fg=PALETTE["warning"],
             font=FONTS["tag"],
         ).pack(side="left")
         tk.Label(
-            legend_frame, text="Variables Karel",
+            karel_row, text="Variables Karel",
             bg=PALETTE["bg_panel"], fg=PALETTE["text_dim"],
             font=FONTS["small"],
         ).pack(side="left", padx=(4, 0))
+        
 
 
     def _section_label(self, text: str) -> None:
@@ -167,9 +163,6 @@ class SidebarPanel(tk.Frame):
         self._vm.set_input_dir(raw)
         self._vm.start_extraction()
 
-    def _on_scope_change(self) -> None:
-        """Notifie le ViewModel du changement de filtre de scope."""
-        self._vm.set_scope_filter(self._scope_var.get())
 
     def _export(self) -> None:
         fmt = self._export_fmt.get()
