@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Callable
 
 from config.settings import Settings
-from models.fanuc_models import ExtractionResult, ConversionResult, ConversionStatus
+from models.fanuc_models import ExtractionResult, ConversionResult, ConversionStatus, RobotBackup, WorkspaceResult
 from services.parser import VAParser
 from services.exporter import VariableExporter
 
@@ -42,8 +42,7 @@ class ExtractionOrchestrator:
         input_dir: Path,
         output_dir: Path | None = None,
         progress_cb: ProgressCallback | None = None,
-        skip_conversion: bool = True,
-        cancel_event: threading.Event | None = None,
+        skip_conversion: bool = True
     ) -> ExtractionResult:
         """Lance le pipeline d'extraction.
 
@@ -54,7 +53,7 @@ class ExtractionOrchestrator:
         :returns: ``ExtractionResult`` avec toutes les variables et les erreurs éventuelles.
         """
         if skip_conversion:
-            return self._run_direct(input_dir, progress_cb, cancel_event)
+            return self._run_direct(input_dir, progress_cb)
         return self._run_with_conversion(input_dir, output_dir, progress_cb)
 
     def export(self, result: ExtractionResult, output_path: Path, fmt: str = "csv") -> None:
@@ -67,37 +66,83 @@ class ExtractionOrchestrator:
         self._exporter.export(result.variables, output_path, fmt)
 
 
+    def scan_workspace(self, root_path: Path) -> WorkspaceResult:
+        """Scanne un dossier racine et détecte les sous-dossiers contenant des .VA.
+
+        Ne parse pas les fichiers immédiatement — retourne uniquement la structure
+        pour permettre à l'UI d'afficher la liste des robots avant le chargement.
+
+        :param root_path: dossier racine contenant les sous-dossiers robots.
+        :returns: ``WorkspaceResult`` avec un ``RobotBackup`` par sous-dossier trouvé.
+        """
+        result = WorkspaceResult(root_path=root_path)
+
+        # Chercher les sous-dossiers directs qui contiennent au moins un .VA
+        candidates = sorted(
+            p for p in root_path.iterdir()
+            if p.is_dir() and any(p.rglob("*.[Vv][Aa]"))
+        )
+
+        # Cas dégénéré : le dossier racine lui-même contient des .VA (backup simple)
+        if not candidates and any(root_path.glob("*.[Vv][Aa]")):
+            result.backups.append(RobotBackup(name=root_path.name, path=root_path))
+        else:
+            for sub in candidates:
+                result.backups.append(RobotBackup(name=sub.name, path=sub))
+
+        logger.info("Workspace scanné : %d robot(s) trouvé(s) dans %s",
+                    len(result.backups), root_path)
+        return result
+
+    def load_backup(
+        self,
+        backup: RobotBackup,
+        progress_cb: ProgressCallback | None = None,
+    ) -> RobotBackup:
+        """Parse tous les .VA d'un backup robot et peuple ``backup.variables``.
+
+        Modifie ``backup`` en place et retourne-le pour faciliter
+        l'utilisation avec ``BackgroundWorker``.
+
+        :param backup:      ``RobotBackup`` à charger (``backup.loaded`` passe à ``True``).
+        :param progress_cb: callback ``(current, total, message)`` optionnel.
+        :returns: le même objet ``backup`` mis à jour.
+        """
+        result = self._run_direct(backup.path, progress_cb)
+        backup.variables = result.variables
+        backup.errors    = result.errors
+        backup.loaded    = True
+        return backup
+
+    # ------------------------------------------------------------------
+    # Pipelines
+    # ------------------------------------------------------------------
 
     def _run_direct(
         self,
         input_dir: Path,
         progress_cb: ProgressCallback | None,
-        cancel_event: threading.Event | None = None,
     ) -> ExtractionResult:
         """Parse directement tous les fichiers .VA du dossier (V1 — sans Roboguide)."""
         va_files = sorted(p for p in input_dir.rglob("*") if p.suffix.lower() == ".va")
         total    = len(va_files)
 
         if total == 0:
-            _notify(progress_cb, 0, 0, "Aucun fichier .VA trouvé.")
+            _notify(progress_cb, 0, 0, "No .VA files found.")
             return ExtractionResult(input_dir=input_dir)
 
         result = ExtractionResult(input_dir=input_dir)
         for i, va_path in enumerate(va_files, start=1):
-            if cancel_event and cancel_event.is_set():
-                _notify(progress_cb, i, total, "Extraction annulée.")
-                result.errors.append("Annulé par l'utilisateur.")
-                break
             _notify(progress_cb, i, total, f"Parsing : {va_path.name}")
             try:
                 result.variables.extend(self._parser.parse_file(va_path))
             except Exception as exc:
                 result.errors.append(f"{va_path.name}: {exc}")
-                logger.error("Erreur parsing %s : %s", va_path.name, exc)
+                logger.error("Parsing Error %s : %s", va_path.name, exc)
 
         _notify(
             progress_cb, total, total,
-            f"Terminé — {result.var_count} variable(s), {result.field_count} field(s)",
+            f"Finished — {result.var_count} variable(s), {result.field_count} field(s)",
         )
         return result
 
@@ -111,7 +156,7 @@ class ExtractionOrchestrator:
         result = ExtractionResult(input_dir=input_dir)
 
         with _ensure_output_dir(output_dir) as work_dir:
-            _notify(progress_cb, 0, 1, "Conversion en cours…")
+            _notify(progress_cb, 0, 1, "Conversion in progress…")
             conversion_results = self._convert_directory(input_dir, work_dir, progress_cb)
 
             successful = [
@@ -129,16 +174,18 @@ class ExtractionOrchestrator:
         for r in conversion_results:
             if r.status == ConversionStatus.FAILED:
                 result.errors.append(
-                    f"Conversion échouée : {r.source_path.name} — {r.error_message}"
+                    f"Conversion failed : {r.source_path.name} — {r.error_message}"
                 )
 
         _notify(
             progress_cb, 1, 1,
-            f"Terminé — {result.var_count} variable(s), {result.field_count} field(s)",
+            f"Finished — {result.var_count} variable(s), {result.field_count} field(s)",
         )
         return result
 
-    # Conversion (V1 — TODO)
+    # ------------------------------------------------------------------
+    # Conversion (V2 — TODO)
+    # ------------------------------------------------------------------
 
     def _convert_directory(
         self,
@@ -190,10 +237,13 @@ class ExtractionOrchestrator:
     @staticmethod
     def _find_convertible_files(directory: Path) -> list[Path]:
         """TODO : ajuster les extensions sources selon le format Roboguide."""
-        extensions = {".vr", ".tp", ".sv"}
+        extensions = {".vs", ".tp", ".vr"}
         return sorted(p for p in directory.rglob("*") if p.suffix.lower() in extensions)
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _notify(cb: ProgressCallback | None, cur: int, tot: int, msg: str) -> None:
     if cb:

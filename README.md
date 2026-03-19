@@ -62,4 +62,3 @@ fanuc_extractor/
 * [ ] `services/converter.py` → `_find_convertible_files()` : ajuster les extensions source
 * [ ] `services/parser.py` → `_VAR_PATTERN` : affiner le regex selon le format .VA exact
 * [ ] `ui/viewmodel.py` → `_poll()` : remplacer `tk._default_root` par une référence propre
-* [ ] `AppViewModel.cancel()` : implémenter l'arrêt propre du subprocess

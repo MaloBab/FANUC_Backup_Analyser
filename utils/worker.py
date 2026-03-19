@@ -25,8 +25,6 @@ class BackgroundWorker:
     def __init__(self) -> None:
         self._queue:    queue.Queue             = queue.Queue()
         self._thread:   threading.Thread | None = None
-        self._cancelled: bool                  = False
-        self.cancel_event: threading.Event      = threading.Event()
         """Event partageable avec les tâches longues pour une annulation coopérative."""
 
     @property
@@ -45,8 +43,6 @@ class BackgroundWorker:
             raise RuntimeError("Un worker est déjà en cours d'exécution.")
 
         kwargs = kwargs or {}
-        self._cancelled = False
-        self.cancel_event.clear()
 
         def _target():
             try:
@@ -61,25 +57,14 @@ class BackgroundWorker:
         self._on_done = on_done
         self._on_error = on_error
 
-    def cancel(self) -> None:
-        """Demande l'arrêt du worker de façon coopérative.
-
-        Positionne ``cancel_event`` pour que les tâches longues puissent
-        vérifier ``cancel_event.is_set()`` entre chaque itération, et marque
-        ``_cancelled`` pour ignorer le résultat dans ``poll_result``.
-        """
-        self._cancelled = True
-        self.cancel_event.set()
 
     def poll_result(self) -> bool:
         """À appeler périodiquement depuis la boucle Tkinter (via after()).
 
-        :returns: ``True`` si le worker a terminé (succès, erreur ou annulation).
+        :returns: ``True`` si le worker a terminé (succès ou erreur).
         """
         try:
             status, payload = self._queue.get_nowait()
-            if self._cancelled:
-                return True
             if status == "done" and self._on_done:
                 self._on_done(payload)
             elif status == "error" and self._on_error:

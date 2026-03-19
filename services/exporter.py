@@ -12,7 +12,7 @@ import json
 import logging
 from pathlib import Path
 
-from models.fanuc_models import RobotVariable, SystemVarField, ArrayValue, _serialize_value
+from models.fanuc_models import RobotVariable, RobotVarField, ArrayValue, _serialize_value
 
 logger = logging.getLogger(__name__)
 
@@ -27,14 +27,14 @@ class ExportError(Exception):
 class VariableExporter:
     """Exporte une liste de RobotVariable vers CSV (résumé ou flat) ou JSON."""
 
-    _SUPPORTED = {"csv", "csv_flat", "json"}
+    _SUPPORTED = {"csv", "label"}
 
     def export(self, variables: list[RobotVariable], path: Path, fmt: str = "csv") -> None:
         """Exporte les variables vers le fichier indiqué dans le format demandé.
 
         :param variables: liste de variables à exporter.
         :param path: chemin de destination (le dossier parent est créé si absent).
-        :param fmt: "csv", "csv_flat" ou "json".
+        :param fmt: "csv", "label".
         :raises ExportError: si le format n'est pas supporté.
         """
         fmt = fmt.lower()
@@ -124,7 +124,7 @@ class VariableExporter:
                     "value": item_val,
                 })
 
-        def _write_field(w: csv.DictWriter, base: dict, fld: SystemVarField) -> None:
+        def _write_field(w: csv.DictWriter, base: dict, fld: RobotVarField) -> None:
             """Écrit une ou plusieurs lignes pour un field."""
             val = _serialize_value(fld.value)
             if isinstance(fld.value, ArrayValue):

@@ -3,8 +3,8 @@ Modèles de données — représentations fidèles de la structure des fichiers 
 
 Convention sur ``FieldValue`` :
   - ``str``          : valeur scalaire normalisée (y compris ``"Uninitialized"``)
-  - ``ArrayValue``   : tableau indexé de valeurs scalaires
-  - ``PositionValue``: position cartésienne/articulaire multilignes
+  - ``ArrayValue``   : tableau indexé — items scalaires ou ``PositionValue`` (``ARRAY OF POSITION``)
+  - ``PositionValue``: position cartésienne/articulaire multilignes (variable scalaire POSITION)
   - ``None``         : absence de valeur (variable non encore parsée ou sans bloc de valeur)
 """
 
@@ -17,6 +17,7 @@ from pathlib import Path
 class StorageType(Enum):
     CMOS    = "CMOS"
     SHADOW  = "SHADOW"
+    DRAM    = "DRAM"
     UNKNOWN = "?"
 
 
@@ -42,11 +43,20 @@ class VADataType(Enum):
 
 @dataclass
 class ArrayValue:
-    """Tableau indexé de valeurs scalaires (index entier → valeur ou None)."""
+    """Tableau indexé de valeurs scalaires ou de positions (index N-D → valeur).
 
-    items: dict[tuple[int, ...], str | None] = field(default_factory=dict)
+    Les items peuvent être :
+      - ``str``           : valeur scalaire (y compris ``"Uninitialized"``)
+      - ``None``          : absence de valeur
+      - ``PositionValue`` : position FANUC (cas ``ARRAY[N] OF POSITION``)
+    """
+
+    items: dict[tuple[int, ...], str | None | PositionValue] = field(default_factory=dict)
 
     def __repr__(self) -> str:
+        n_pos = sum(1 for v in self.items.values() if isinstance(v, PositionValue))
+        if n_pos:
+            return f"Array({len(self.items)} positions)"
         return f"Array({len(self.items)} items)"
 
 
@@ -65,7 +75,7 @@ FieldValue  = ScalarValue | ArrayValue | PositionValue
 
 
 @dataclass
-class SystemVarField:
+class RobotVarField:
     """Champ d'une variable structurée ou tableau de structs FANUC.
 
     ``parent_index_nd`` encode l'index parent sous forme de tuple :
@@ -109,7 +119,7 @@ class RobotVariable:
     array_size:  int | None
     array_shape: tuple[int, ...] | None = None
     value:       FieldValue = None
-    fields:      list[SystemVarField] = field(default_factory=list)
+    fields:      list[RobotVarField] = field(default_factory=list)
     source_file: Path | None = None
     line_number: int | None = None
 
@@ -166,6 +176,58 @@ class ExtractionResult:
 
 
 
+
+# ---------------------------------------------------------------------------
+# Navigation multi-backups
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RobotBackup:
+    """Représente un backup robot : un sous-dossier contenant des fichiers .VA.
+
+    :param name:      nom du dossier (= identifiant du robot).
+    :param path:      chemin absolu du dossier.
+    :param variables: variables parsées (vide jusqu'au premier chargement).
+    :param errors:    erreurs de parsing éventuelles.
+    :param loaded:    ``True`` si le parsing a déjà été effectué.
+    """
+    name:      str
+    path:      Path
+    variables: list[RobotVariable] = field(default_factory=list)
+    errors:    list[str]            = field(default_factory=list)
+    loaded:    bool                 = False
+
+    @property
+    def var_count(self) -> int:
+        return len(self.variables)
+
+    @property
+    def field_count(self) -> int:
+        return sum(len(v.fields) for v in self.variables)
+
+
+@dataclass
+class WorkspaceResult:
+    """Résultat d'un scan de dossier racine multi-robots.
+
+    :param root_path: dossier racine sélectionné par l'utilisateur.
+    :param backups:   liste des backups trouvés (un par sous-dossier avec .VA).
+    """
+    root_path: Path
+    backups:   list[RobotBackup] = field(default_factory=list)
+
+    @property
+    def robot_count(self) -> int:
+        return len(self.backups)
+
+    @property
+    def loaded_count(self) -> int:
+        return sum(1 for b in self.backups if b.loaded)
+
+# ---------------------------------------------------------------------------
+# Modèles de conversion
+# ---------------------------------------------------------------------------
+
 class ConversionStatus(Enum):
     PENDING = "PENDING"
     SUCCESS = "SUCCESS"
@@ -182,18 +244,26 @@ class ConversionResult:
     duration_s:    float | None = None
 
 
+# ---------------------------------------------------------------------------
+# Sérialiseurs (utilisés par to_dict et l'exporter)
+# ---------------------------------------------------------------------------
 
 def _serialize_value(value: FieldValue) -> object:
     if value is None:
         return None
     if isinstance(value, ArrayValue):
-        return {",".join(str(i) for i in k): v for k, v in value.items.items()}
+        return {
+            ",".join(str(i) for i in k): (
+                " | ".join(v.raw_lines) if isinstance(v, PositionValue) else v
+            )
+            for k, v in value.items.items()
+        }
     if isinstance(value, PositionValue):
         return " | ".join(value.raw_lines)
     return value
 
 
-def _field_to_dict(f: SystemVarField) -> dict:
+def _field_to_dict(f: RobotVarField) -> dict:
     return {
         "full_name":       f.full_name,
         "field_name":      f.field_name,

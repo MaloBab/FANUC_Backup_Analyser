@@ -3,19 +3,19 @@ Parser de fichiers .VA FANUC.
 
 Formats de variables gérés
 ──────────────────────────
-Variables système  : [*SYSTEM*]$NOM  Storage: X  Access: Y  : <type_spec>
-Variables Karel    : [NAMESPACE]NOM   Storage: X  Access: Y  : <type_spec>
+Variables système  : ``[*SYSTEM*]$NOM  Storage: X  Access: Y  : <type_spec>``
+Variables Karel    : ``[NAMESPACE]NOM   Storage: X  Access: Y  : <type_spec>``
 
 Cas de type_spec gérés
 ──────────────────────
-1. Scalaire simple      : INTEGER = 0
-2. Tableau 1-D          : ARRAY[9] OF REAL          + lignes [N] = val
-3. Tableau N-D          : ARRAY[4,200] OF TRACEDT_T + Fields [N,M]
-4. Struct simple        : ALMDG_T =                 + Fields
-5. Tableau de structs   : ARRAY[1] OF AAVM_WRK_T    + Fields
-6. Field scalaire       : Field: X.Y Access: RW: INTEGER = val
-7. Field tableau        : Field: X.Y  ARRAY[N] OF TYPE + lignes [N] = val
-8. Field POSITION       : Field: X.Y Access: RW: POSITION = + lignes Group/X/W…
+1. Scalaire simple      : ``INTEGER = 0``
+2. Tableau 1-D          : ``ARRAY[9] OF REAL``          + lignes ``[N] = val``
+3. Tableau N-D          : ``ARRAY[4,200] OF TRACEDT_T`` + Fields ``[N,M]``
+4. Struct simple        : ``ALMDG_T =``                 + Fields
+5. Tableau de structs   : ``ARRAY[1] OF AAVM_WRK_T``    + Fields
+6. Field scalaire       : ``Field: X.Y Access: RW: INTEGER = val``
+7. Field tableau        : ``Field: X.Y  ARRAY[N] OF TYPE`` + lignes ``[N] = val``
+8. Field POSITION       : ``Field: X.Y Access: RW: POSITION =`` + lignes Group/X/W…
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import logging
 from pathlib import Path
 
 from models.fanuc_models import (
-    RobotVariable, SystemVarField,
+    RobotVariable, RobotVarField,
     StorageType, AccessType, VADataType,
     ArrayValue, PositionValue,
     ExtractionResult,
@@ -33,19 +33,21 @@ from models.fanuc_models import (
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Regex
+# ---------------------------------------------------------------------------
 
-
-# header : [NAMESPACE]NOM  Storage: X  Access: Y  : <type_spec>
+# En-tête unifié : [NAMESPACE]NOM  Storage: X  Access: Y  : <type_spec>
 # Couvre *SYSTEM* et tout namespace Karel (TBSWMD45, etc.)
 _RE_VAR_HEADER = re.compile(
-    r"^\[([^\]]+)\]"                 # [namespace] capturé sans les crochets
+    r"^\[([^\]]+)\]"                 # [namespace]  (tout sauf ])
     r"(\$?[\w.]+)"                   # nom (optionnellement préfixé $, peut contenir des points)
     r"\s+Storage:\s*(\w+)"           # storage
     r"\s+Access:\s*(\w+)"            # access
     r"\s*:\s*(.+)$"                  # type_spec
 )
 
-# Nom complet d'un field : $AP_CUREQ[1].$PANE_EQNO, NFPAM.TBC.CNT_SCALE, $ALMDG.$X
+# Nom complet d'un field : ``$AP_CUREQ[1].$PANE_EQNO``, ``NFPAM.TBC.CNT_SCALE``, ``$ALMDG.$X``
 # Capturé en un seul groupe puis décomposé par _split_field_name()
 _RE_FIELD_NAME = r"[\w.\$\[\],]+"
 
@@ -70,7 +72,7 @@ _RE_FIELD_POSITION = re.compile(
     r":\s*(POSITION|XYZWPR\w*)\s*=\s*$"
 )
 
-# Ligne [N] = val ou [N,M] = val dans un tableau
+# Ligne ``[N] = val`` ou ``[N,M] = val`` dans un tableau
 _RE_ARRAY_ITEM = re.compile(r"^\s*\[([\d,]+)\]\s*=\s*(.*)$")
 
 # type_spec : tableau N-D
@@ -82,18 +84,25 @@ _RE_TYPE_SCALAR = re.compile(r"^(\w+(?:\[\d+\])?)(?:\s*=\s*(.*))?$")
 _RE_POSITION_LINE = re.compile(r"^\s*(Group:|Config:|X:|Y:|Z:|W:|P:|R:|\[)")
 
 # Décomposition d'un nom de field brut en (parent, [index], field_name)
-# Ex: $AP_CUREQ[1].$PANE_EQNO  → $AP_CUREQ, [1],   $PANE_EQNO
-#     NFPAM.TBC.CNT_SCALE       → NFPAM.TBC, None,  CNT_SCALE
-#     $ALMDG.$X                 → $ALMDG,    None,  $X
-_RE_FIELD_SPLIT = re.compile(r"^([\w.\$]+?)(\[[\d,]+\])?\.([\$\w]+)$")
+# Ex: ``$AP_CUREQ[1].$PANE_EQNO``  → ``$AP_CUREQ``, ``[1]``,   ``$PANE_EQNO``
+#     ``NFPAM.TBC.CNT_SCALE``       → ``NFPAM.TBC``, ``None``,  ``CNT_SCALE``
+#     ``$ALMDG.$X``                 → ``$ALMDG``,    ``None``,  ``$X``
+_RE_FIELD_SPLIT = re.compile(
+    r"^([\w.\$][\w.\$\[\],]*?)"
+    r"(?:\[([\d,]+)\])?"
+    r"\.([\$\w]+)$"
+)
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _parse_access(raw: str) -> AccessType:
-    """Convertit une chaîne brute en AccessType.
+    """Convertit une chaîne brute en ``AccessType``.
 
-    :param raw: valeur textuelle extraite du fichier .VA (ex: "RW", "FP").
-    :returns: membre AccessType correspondant, ou AccessType.UNKNOWN si non reconnu.
+    :param raw: valeur textuelle extraite du fichier .VA (ex: ``"RW"``, ``"FP"``).
+    :returns: membre ``AccessType`` correspondant, ou ``AccessType.UNKNOWN`` si non reconnu.
     """
     try:
         return AccessType(raw.strip().upper())
@@ -102,10 +111,10 @@ def _parse_access(raw: str) -> AccessType:
 
 
 def _parse_storage(raw: str) -> StorageType:
-    """Convertit une chaîne brute en StorageType.
+    """Convertit une chaîne brute en ``StorageType``.
 
-    :param raw: valeur textuelle extraite du fichier .VA (ex: "CMOS", "SHADOW").
-    :returns: membre StorageType correspondant, ou StorageType.UNKNOWN si non reconnu.
+    :param raw: valeur textuelle extraite du fichier .VA (ex: ``"CMOS"``, ``"SHADOW"``).
+    :returns: membre ``StorageType`` correspondant, ou ``StorageType.UNKNOWN`` si non reconnu.
     """
     try:
         return StorageType(raw.strip().upper())
@@ -114,14 +123,14 @@ def _parse_storage(raw: str) -> StorageType:
 
 
 def _parse_datatype(raw: str) -> VADataType:
-    """Déduit le VADataType depuis une chaîne de type brute.
+    """Déduit le ``VADataType`` depuis une chaîne de type brute.
 
-    La comparaison ignore la partie dimensionnelle (ex: STRING[37] → STRING).
-    Les types commençant par une majuscule non reconnue sont classés STRUCT.
+    La comparaison ignore la partie dimensionnelle (ex: ``STRING[37]`` → ``STRING``).
+    Les types commençant par une majuscule non reconnue sont classés ``STRUCT``.
 
-    :param raw: type brut extrait du fichier .VA (ex: "INTEGER", "ALMDG_T", "STRING[37]").
-    :returns: membre VADataType correspondant, VADataType.STRUCT pour les types
-              utilisateur inconnus, ou VADataType.UNKNOWN en dernier recours.
+    :param raw: type brut extrait du fichier .VA (ex: ``"INTEGER"``, ``"ALMDG_T"``, ``"STRING[37]"``).
+    :returns: membre ``VADataType`` correspondant, ``VADataType.STRUCT`` pour les types
+              utilisateur inconnus, ou ``VADataType.UNKNOWN`` en dernier recours.
     """
     if not raw:
         return VADataType.UNKNOWN
@@ -135,12 +144,12 @@ def _parse_datatype(raw: str) -> VADataType:
 def _scalar_value(raw: str) -> str | None:
     """Normalise une valeur scalaire brute extraite du fichier .VA.
 
-    - Chaîne vide ou "Uninitialized" → retourne "Uninitialized".
-    - Chaîne entre apostrophes (type STRING) → retire les délimiteurs.
+    - Chaîne vide ou ``"Uninitialized"`` → retourne ``"Uninitialized"``.
+    - Chaîne entre apostrophes (type ``STRING``) → retire les délimiteurs.
     - Autres cas → retourne la chaîne telle quelle.
 
-    :param raw: valeur brute après le =.
-    :returns: valeur normalisée, ou "Uninitialized" si la valeur est absente.
+    :param raw: valeur brute après le ``=``.
+    :returns: valeur normalisée, ou ``"Uninitialized"`` si la valeur est absente.
     """
     raw = raw.strip()
     if raw in ("", "Uninitialized"):
@@ -151,10 +160,10 @@ def _scalar_value(raw: str) -> str | None:
 
 
 def _parse_nd_index(raw: str | None) -> tuple[int, ...] | None:
-    """Parse une chaîne d'index brute issue de la regex (ex: "[1,2]", "[3]").
+    """Parse une chaîne d'index brute issue de la regex (ex: ``"[1,2]"``, ``"[3]"``).
 
-    :param raw: chaîne avec crochets capturée par la regex, ou None.
-    :returns: tuple des indices (i,) en 1D, (i, j, …) en N-D, ou None.
+    :param raw: chaîne avec crochets capturée par la regex, ou ``None``.
+    :returns: tuple des indices ``(i,)`` en 1D, ``(i, j, …)`` en N-D, ou ``None``.
     """
     if raw is None:
         return None
@@ -167,14 +176,14 @@ def _split_field_name(raw: str) -> tuple[str, tuple[int, ...] | None, str]:
     """Décompose le nom complet d'un field en ses trois composantes.
 
     Exemples :
-      - "$AP_CUREQ[1].$PANE_EQNO"  → ("$AP_CUREQ",    (1,),    "$PANE_EQNO")
-      - "$PGTRACEDT[1,2].$LINE_NUM" → ("$PGTRACEDT",   (1, 2),  "$LINE_NUM")
-      - "NFPAM.TBC.CNT_SCALE"       → ("NFPAM.TBC",    None,    "CNT_SCALE")
-      - "$ALMDG.$X"                 → ("$ALMDG",       None,    "$X")
+      - ``"$AP_CUREQ[1].$PANE_EQNO"``  → ``("$AP_CUREQ",    (1,),    "$PANE_EQNO")``
+      - ``"$PGTRACEDT[1,2].$LINE_NUM"`` → ``("$PGTRACEDT",   (1, 2),  "$LINE_NUM")``
+      - ``"NFPAM.TBC.CNT_SCALE"``       → ``("NFPAM.TBC",    None,    "CNT_SCALE")``
+      - ``"$ALMDG.$X"``                 → ``("$ALMDG",       None,    "$X")``
 
-    :param raw: nom complet tel que capturé par _RE_FIELD_NAME.
-    :returns: triplet (parent_var, parent_index_nd, field_name).
-              Si la décomposition échoue, retourne (raw, None, raw).
+    :param raw: nom complet tel que capturé par ``_RE_FIELD_NAME``.
+    :returns: triplet ``(parent_var, parent_index_nd, field_name)``.
+              Si la décomposition échoue, retourne ``(raw, None, raw)``.
     """
     m = _RE_FIELD_SPLIT.match(raw)
     if not m:
@@ -186,8 +195,8 @@ def _split_field_name(raw: str) -> tuple[str, tuple[int, ...] | None, str]:
 def _parse_array_dims(type_spec: str) -> tuple[tuple[int, ...], int, str]:
     """Extrait les dimensions, la taille totale et le type interne d'un type tableau.
 
-    :param type_spec: chaîne de type_spec commençant par ARRAY[…] (ex: "ARRAY[4,200] OF TRACEDT_T").
-    :returns: triplet (shape, total_size, inner_type) où shape est le tuple de dimensions.
+    :param type_spec: chaîne de type_spec commençant par ``ARRAY[…]`` (ex: ``"ARRAY[4,200] OF TRACEDT_T"``).
+    :returns: triplet ``(shape, total_size, inner_type)`` où ``shape`` est le tuple de dimensions.
     :raises ValueError: si le format n'est pas reconnu.
     """
     bracket_start = type_spec.index("[") + 1
@@ -202,25 +211,56 @@ def _parse_array_dims(type_spec: str) -> tuple[tuple[int, ...], int, str]:
     return dims, size, m.group(1)
 
 
-# ------------------------
+# ---------------------------------------------------------------------------
 # Parser principal
-# ------------------------
+# ---------------------------------------------------------------------------
+
+# Types de position FANUC dont les tableaux doivent être traités comme ARRAY OF POSITION
+_POSITION_TYPES: frozenset[str] = frozenset({
+    "POSITION",
+    "XYZWPR",
+    "XYZWPREXT",   # NON — XYZWPREXT est un tableau de scalaires, pas de positions
+    "JOINTPOS",
+    "JOINTPOS9",
+})
+# Note : XYZWPREXT a le format [N] = Uninitialized (scalaire), pas Group:/X:/W:
+# Seuls POSITION et XYZWPR ont le format multiligne Group:/X:/Y:/Z:/W:/P:/R:
+_ARRAY_OF_POSITION_TYPES: frozenset[str] = frozenset({"POSITION", "XYZWPR", "XYZWPREXT"})
+
+
+def _is_position_array(type_detail: str) -> bool:
+    """Retourne True si type_detail est un ARRAY dont les items sont des positions multilignes.
+
+    Seuls POSITION et XYZWPR ont le format :
+        [N] =
+        Group: ...
+        X: ...  Y: ...  Z: ...
+        W: ...  P: ...  R: ...
+
+    XYZWPREXT, JOINTPOS et les types struct ont un format différent.
+    """
+    upper = type_detail.upper()
+    if " OF " not in upper:
+        return False
+    inner = upper.split(" OF ", 1)[-1].strip().split()[0]
+    return inner in _ARRAY_OF_POSITION_TYPES
+
 
 class VAParser:
-    """Parse les fichiers .VA FANUC et retourne une liste de RobotVariable.
+    """Parse les fichiers .VA FANUC et retourne une liste de ``RobotVariable``.
 
-    Supporte les variables système ([*SYSTEM*]) et les variables Karel
-    ([NAMESPACE]) dans un format unifié. Implémente un automate ligne
+    Supporte les variables système (``[*SYSTEM*]``) et les variables Karel
+    (``[NAMESPACE]``) dans un format unifié. Implémente un automate ligne
     par ligne sans regex multilignes.
     """
 
     def parse_file(self, va_path: Path) -> list[RobotVariable]:
-        """Parse un fichier .VA et retourne la liste de toutes ses variables.
+        """Parse un fichier ``.VA`` FANUC et retourne la liste de toutes ses variables.
 
         Le fichier est lu en UTF-8 avec remplacement des octets invalides.
 
-        :param va_path: chemin vers le fichier .VA à lire.
-        :returns: liste de RobotVariable dans l'ordre d'apparition.
+        :param va_path: chemin vers le fichier ``.VA`` à lire.
+        :returns: liste de ``RobotVariable`` dans l'ordre d'apparition.
                   Retourne une liste vide si le fichier est introuvable ou illisible.
         """
         if not va_path.exists():
@@ -250,14 +290,14 @@ class VAParser:
         return variables
 
     def parse_directory(self, directory: Path) -> ExtractionResult:
-        """Parse récursivement tous les fichiers .VA d'un dossier.
+        """Parse récursivement tous les fichiers ``.VA`` d'un dossier.
 
-        La recherche est insensible à la casse de l'extension (.VA et .va).
-        Les erreurs sur un fichier individuel sont consignées dans ExtractionResult.errors
+        La recherche est insensible à la casse de l'extension (``.VA`` et ``.va``).
+        Les erreurs sur un fichier individuel sont consignées dans ``ExtractionResult.errors``
         sans interrompre le traitement des fichiers suivants.
 
-        :param directory: dossier racine à parcourir.
-        :returns: ExtractionResult agrégeant toutes les variables et les erreurs.
+        :param directory: dossier racine à parcourir récursivement.
+        :returns: ``ExtractionResult`` agrégeant toutes les variables et les erreurs.
         """
         result = ExtractionResult(input_dir=directory)
         va_files = sorted(
@@ -271,7 +311,9 @@ class VAParser:
                 result.errors.append(f"{va_file.name}: {exc}")
         return result
 
-
+    # ------------------------------------------------------------------
+    # Automate interne
+    # ------------------------------------------------------------------
 
     def _parse_variable(
         self,
@@ -283,13 +325,14 @@ class VAParser:
         """Parse une variable complète depuis son en-tête jusqu'au début de la suivante.
 
         Implémente un automate à états qui consomme les lignes suivant l'en-tête
-        pour reconstituer la valeur ou les fields. Gère les 8 cas identifiés.
+        pour reconstituer la valeur ou les fields. Gère les 8 cas documentés dans
+        le module.
 
-        :param header_match: résultat de _RE_VAR_HEADER.match() sur la ligne d'en-tête.
+        :param header_match: résultat de ``_RE_VAR_HEADER.match()`` sur la ligne d'en-tête.
         :param lines: liste complète des lignes du fichier.
-        :param start: index de la ligne d'en-tête.
+        :param start: index (0-based) de la ligne d'en-tête.
         :param source: chemin du fichier source.
-        :returns: tuple (variable, next_index) — next_index est la prochaine
+        :returns: tuple ``(variable, next_index)`` — ``next_index`` est la prochaine
                   ligne à traiter par la boucle principale.
         """
         namespace, name, raw_storage, raw_access, type_spec = header_match.groups()
@@ -326,12 +369,18 @@ class VAParser:
             line_number = start + 1,
         )
 
+        # Valeur scalaire inline sur l'en-tête
         if not is_array and "=" in type_spec:
             raw_val   = type_spec.split("=", 1)[1].strip()
             var.value = _scalar_value(raw_val)
 
-        i             = start + 1
-        current_array : ArrayValue | None = None
+        # Lecture des lignes suivantes
+        i                      = start + 1
+        current_array          : ArrayValue | None = None
+        current_array_is_pos   : bool             = False  # True si field ARRAY[N] OF POSITION
+        root_is_pos            : bool             = (  # True si variable racine ARRAY OF POSITION
+            is_array and _is_position_array(type_spec)
+        )
 
         while i < len(lines):
             line    = lines[i]
@@ -341,10 +390,12 @@ class VAParser:
                 break
 
             if not stripped:
-                current_array = None
+                current_array        = None
+                current_array_is_pos = False
                 i += 1
                 continue
 
+            # -- Field POSITION (multilignes) --
             m = _RE_FIELD_POSITION.match(stripped)
             if m:
                 f = self._make_field_position(m)
@@ -357,16 +408,19 @@ class VAParser:
                         break
                     pos_lines.append(pl)
                     i += 1
-                f.value       = PositionValue(raw_lines=pos_lines)
-                current_array = None
+                f.value              = PositionValue(raw_lines=pos_lines)
+                current_array        = None
+                current_array_is_pos = False
                 continue
 
+            # -- Field tableau (sans Access:) --
             m = _RE_FIELD_ARRAY.match(stripped)
             if m:
                 f = self._make_field_array(m)
                 var.fields.append(f)
                 assert isinstance(f.value, ArrayValue)
-                current_array = f.value
+                current_array        = f.value
+                current_array_is_pos = _is_position_array(f.type_detail)
                 i += 1
                 continue
 
@@ -375,27 +429,71 @@ class VAParser:
             if m:
                 f = self._make_field_scalar(m)
                 var.fields.append(f)
-                current_array = None
+                current_array        = None
+                current_array_is_pos = False
                 i += 1
                 continue
 
             # -- Ligne [N] ou [N,M] = val --
             m = _RE_ARRAY_ITEM.match(stripped)
             if m:
-                key = _parse_nd_index(f"[{m.group(1)}]")
+                key     = _parse_nd_index(f"[{m.group(1)}]")
                 assert key is not None
-                val = _scalar_value(m.group(2))
-                if current_array is not None:
-                    current_array.items[key] = val
-                else:
-                    if not isinstance(var.value, ArrayValue):
-                        var.value = ArrayValue()
-                    var.value.items[key] = val
-                i += 1
-                continue
+                raw_val = m.group(2).strip()
 
-            # -- Lignes de position racine --
-            if _RE_POSITION_LINE.match(stripped):
+                is_pos_context = (
+                    (current_array is not None and current_array_is_pos)
+                    or (current_array is None and root_is_pos)
+                )
+                if is_pos_context:
+                    # Cas ARRAY[N] OF POSITION / XYZWPR / XYZWPREXT :
+                    # - Si raw_val est non vide (ex: "Uninitialized"), stocker comme scalaire
+                    # - Sinon, collecter les lignes Group/X/W suivantes comme PositionValue
+                    if raw_val:
+                        # Valeur scalaire inline (ex: "Uninitialized") — pas de lignes à collecter
+                        scalar = _scalar_value(raw_val)
+                        if current_array is not None:
+                            current_array.items[key] = scalar
+                        else:
+                            if not isinstance(var.value, ArrayValue):
+                                var.value = ArrayValue()
+                            var.value.items[key] = scalar
+                        i += 1
+                    else:
+                        # Valeur multiligne (Group:/X:/W:) → PositionValue
+                        i += 1
+                        arr_pos_lines: list[str] = []
+                        while i < len(lines):
+                            pl = lines[i].strip()
+                            if (not pl
+                                    or _RE_VAR_HEADER.match(lines[i])
+                                    or pl.startswith("Field:")
+                                    or _RE_ARRAY_ITEM.match(pl)):
+                                break
+                            if _RE_POSITION_LINE.match(pl):
+                                arr_pos_lines.append(pl)
+                            i += 1
+                        pos_val = PositionValue(raw_lines=arr_pos_lines)
+                        if current_array is not None:
+                            current_array.items[key] = pos_val
+                        else:
+                            if not isinstance(var.value, ArrayValue):
+                                var.value = ArrayValue()
+                            var.value.items[key] = pos_val
+                    continue
+                else:
+                    val = _scalar_value(raw_val)
+                    if current_array is not None:
+                        current_array.items[key] = val
+                    else:
+                        if not isinstance(var.value, ArrayValue):
+                            var.value = ArrayValue()
+                        var.value.items[key] = val
+                    i += 1
+                    continue
+
+            # -- Lignes de position racine (variable POSITION scalaire, pas ARRAY OF POSITION) --
+            if _RE_POSITION_LINE.match(stripped) and not root_is_pos:
                 if not isinstance(var.value, PositionValue):
                     var.value = PositionValue()
                 var.value.raw_lines.append(stripped)
@@ -404,19 +502,27 @@ class VAParser:
 
             i += 1
 
+        # Structs avec fields : ne pas garder "Uninitialized" comme valeur —
+        # la valeur est portée par les fields, pas par la variable elle-même.
+        if var.fields and var.value == "Uninitialized":
+            var.value = None
+
         return var, i
 
+    # ------------------------------------------------------------------
+    # Constructeurs de fields
+    # ------------------------------------------------------------------
 
     @staticmethod
-    def _make_field_scalar(m: re.Match) -> SystemVarField:
-        """Construit un SystemVarField scalaire depuis un match de _RE_FIELD_SCALAR.
+    def _make_field_scalar(m: re.Match) -> RobotVarField:
+        """Construit un ``RobotVarField`` scalaire depuis un match de ``_RE_FIELD_SCALAR``.
 
-        :param m: groupes attendus : (full_name, access, type, valeur_brute).
-        :returns: SystemVarField entièrement renseigné.
+        :param m: groupes attendus : ``(full_name, access, type, valeur_brute)``.
+        :returns: ``RobotVarField`` entièrement renseigné.
         """
         raw_name, raw_access, raw_type, raw_val = m.groups()
         parent_var, nd, field_name = _split_field_name(raw_name)
-        return SystemVarField(
+        return RobotVarField(
             full_name       = raw_name,
             parent_var      = parent_var,
             field_name      = field_name,
@@ -428,17 +534,17 @@ class VAParser:
         )
 
     @staticmethod
-    def _make_field_array(m: re.Match) -> SystemVarField:
-        """Construit un SystemVarField tableau depuis un match de _RE_FIELD_ARRAY.
+    def _make_field_array(m: re.Match) -> RobotVarField:
+        """Construit un ``RobotVarField`` tableau depuis un match de ``_RE_FIELD_ARRAY``.
 
-        La valeur est initialisée à un ArrayValue vide peuplé ensuite.
+        La valeur est initialisée à un ``ArrayValue`` vide peuplé ensuite par la boucle.
 
-        :param m: groupes attendus : (full_name, array_spec).
-        :returns: SystemVarField avec value = ArrayValue() vide.
+        :param m: groupes attendus : ``(full_name, array_spec)``.
+        :returns: ``RobotVarField`` avec ``value = ArrayValue()`` vide.
         """
         raw_name, array_spec = m.groups()
         parent_var, nd, field_name = _split_field_name(raw_name)
-        return SystemVarField(
+        return RobotVarField(
             full_name       = raw_name,
             parent_var      = parent_var,
             field_name      = field_name,
@@ -450,17 +556,17 @@ class VAParser:
         )
 
     @staticmethod
-    def _make_field_position(m: re.Match) -> SystemVarField:
-        """Construit un SystemVarField POSITION depuis un match de _RE_FIELD_POSITION.
+    def _make_field_position(m: re.Match) -> RobotVarField:
+        """Construit un ``RobotVarField`` POSITION depuis un match de ``_RE_FIELD_POSITION``.
 
-        Les lignes de coordonnées sont collectées après la construction et affectées à value.
+        Les lignes de coordonnées sont collectées après la construction et affectées à ``value``.
 
-        :param m: groupes attendus : (full_name, access, type_position).
-        :returns: SystemVarField avec value = PositionValue() vide.
+        :param m: groupes attendus : ``(full_name, access, type_position)``.
+        :returns: ``RobotVarField`` avec ``value = PositionValue()`` vide.
         """
         raw_name, raw_access, raw_type = m.groups()
         parent_var, nd, field_name = _split_field_name(raw_name)
-        return SystemVarField(
+        return RobotVarField(
             full_name       = raw_name,
             parent_var      = parent_var,
             field_name      = field_name,

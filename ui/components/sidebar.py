@@ -1,5 +1,9 @@
 """
-Panneau latéral gauche : sélection du dossier source, filtres, actions.
+Panneau latéral gauche.
+
+Mode simple  : sélection d'un dossier → extraction directe.
+Mode workspace : sélection d'un dossier racine → liste des backups robots
+                 → clic sur un robot → chargement de ses variables.
 """
 
 from __future__ import annotations
@@ -9,10 +13,11 @@ from pathlib import Path
 
 from ui.theme import PALETTE, FONTS
 from ui.viewmodel import AppViewModel
+from models.fanuc_models import RobotBackup, WorkspaceResult
 
 
 class SidebarPanel(tk.Frame):
-    WIDTH = 280
+    WIDTH = 290
 
     def __init__(self, parent: tk.Misc, vm: AppViewModel) -> None:
         super().__init__(parent, bg=PALETTE["bg_panel"], width=self.WIDTH)
@@ -20,148 +25,105 @@ class SidebarPanel(tk.Frame):
         self._vm = vm
         self._build()
 
+    # ------------------------------------------------------------------
+    # Construction
+    # ------------------------------------------------------------------
+
     def _build(self) -> None:
+        self._build_workspace_section()
+        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=8)
+        self._build_legend()
+        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=8)
+        self._build_export_section()
 
-        self._section_label("DOSSIER SOURCE")
+    def _build_workspace_section(self) -> None:
+        self._section_label("WORKSPACE")
 
-        self._input_var = tk.StringVar(value=self._vm.settings.last_input_dir)
-        self._entry_input = self._path_row(
-            self._input_var,
-            placeholder="Choisir un dossier…",
-            command=self._browse_input,
+        self._ws_var = tk.StringVar(value=self._vm.settings.last_input_dir)
+        row = tk.Frame(self, bg=PALETTE["bg_panel"])
+        row.pack(fill="x", padx=16, pady=(0, 4))
+
+        entry = ttk.Entry(row, textvariable=self._ws_var)
+        entry.pack(side="left", fill="x", expand=True)
+        ttk.Button(row, text="…", width=3, command=self._browse_workspace).pack(
+            side="right", padx=(4, 0),
         )
 
-        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=12)
-
-        self._build_type_legend()
-
-        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=12)
-
-        self._btn_start = ttk.Button(
-            self, text="▶  Lancer l'extraction",
-            style="Accent.TButton",
-            command=self._start,
-        )
-        self._btn_start.pack(fill="x", padx=16, pady=(0, 8))
-
         ttk.Button(
-            self, text="✕  Annuler",
-            style="Danger.TButton",
-            command=self._vm.cancel,
-        ).pack(fill="x", padx=16)
+            self, text="🔍  Scan",
+            command=self._scan,
+        ).pack(fill="x", padx=16, pady=(0, 2))
 
-        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=12, pady=12)
-
-        self._section_label("EXPORT")
-
-        self._export_fmt = tk.StringVar(value="csv")
-        for fmt in ("csv", "csv_flat", "json"):
-            ttk.Radiobutton(
-                self, text=fmt.upper(), variable=self._export_fmt, value=fmt,
-            ).pack(anchor="w", padx=20, pady=2)
-
-        ttk.Button(
-            self, text="💾  Exporter",
-            command=self._export,
-        ).pack(fill="x", padx=16, pady=8)
-
-    def _build_type_legend(self) -> None:
-        """légende des types de variables."""
+    def _build_legend(self) -> None:
+        """Légende des couleurs — Système et Karel."""
+        self._section_label("LEGEND")
         frame = tk.Frame(self, bg=PALETTE["bg_panel"])
         frame.pack(fill="x", padx=16)
 
-        legend_frame = tk.Frame(frame, bg=PALETTE["bg_panel"])
-        legend_frame.pack(anchor="w", pady=(6, 0), fill="x")
-        
-        # Légende Système
-        system_row = tk.Frame(legend_frame, bg=PALETTE["bg_panel"])
-        system_row.pack(anchor="w", pady=2)
-        tk.Label(
-            system_row, text="■",
-            bg=PALETTE["bg_panel"], fg=PALETTE["text"],
-            font=FONTS["tag"],
-        ).pack(side="left")
-        tk.Label(
-            system_row, text="Variables Système",
-            bg=PALETTE["bg_panel"], fg=PALETTE["text_dim"],
-            font=FONTS["small"],
-        ).pack(side="left", padx=(4, 0))
-        
-        
-        # Légende Karel
-        karel_row = tk.Frame(legend_frame, bg=PALETTE["bg_panel"])
-        karel_row.pack(anchor="w", pady=2)
-        tk.Label(
-            karel_row, text="■",
-            bg=PALETTE["bg_panel"], fg=PALETTE["warning"],
-            font=FONTS["tag"],
-        ).pack(side="left")
-        tk.Label(
-            karel_row, text="Variables Karel",
-            bg=PALETTE["bg_panel"], fg=PALETTE["text_dim"],
-            font=FONTS["small"],
-        ).pack(side="left", padx=(4, 0))
-        
+        items = [
+            ("■", PALETTE["text"],    "System variables"),
+            ("■", PALETTE["warning"], "Karel variables"),
+        ]
+        for icon, fg, label in items:
+            row = tk.Frame(frame, bg=PALETTE["bg_panel"])
+            row.pack(anchor="w", pady=2)
+            tk.Label(row, text=icon, bg=PALETTE["bg_panel"], fg=fg,
+                     font=FONTS["tag"]).pack(side="left")  # type: ignore[arg-type]
+            tk.Label(row, text=f"  {label}", bg=PALETTE["bg_panel"],
+                     fg=PALETTE["text_dim"],
+                     font=FONTS["small"]).pack(side="left")  # type: ignore[arg-type]
 
+
+    def _build_export_section(self) -> None:
+        self._section_label("EXPORT")
+        self._export_fmt = tk.StringVar(value="csv")
+        for fmt in ("csv", "csv_flat", "json"):
+            ttk.Radiobutton(
+                self, text=fmt.upper(),
+                variable=self._export_fmt, value=fmt,
+            ).pack(anchor="w", padx=20, pady=2)
+        ttk.Button(
+            self, text="💾  Export",
+            command=self._export,
+        ).pack(fill="x", padx=16, pady=8)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def _section_label(self, text: str) -> None:
         tk.Label(
             self, text=text,
             bg=PALETTE["bg_panel"], fg=PALETTE["text_dim"],
-            font=FONTS["tag"], anchor="w",
-        ).pack(fill="x", padx=16, pady=(12, 4))
+            font=FONTS["tag"], anchor="w",  # type: ignore[arg-type]
+        ).pack(fill="x", padx=16, pady=(10, 4))
 
-    def _path_row(
-        self,
-        variable: tk.StringVar,
-        placeholder: str,
-        command,
-    ) -> ttk.Entry:
-        frame = tk.Frame(self, bg=PALETTE["bg_panel"])
-        frame.pack(fill="x", padx=16, pady=2)
+    # ------------------------------------------------------------------
+    # Interface publique (appelée par App via callbacks)
+    # ------------------------------------------------------------------
 
-        entry = ttk.Entry(frame, textvariable=variable)
-        entry.pack(side="left", fill="x", expand=True)
+    def populate_workspace(self, workspace: WorkspaceResult) -> None:
+        """Mémorise le workspace (chargement automatique — pas d'affichage liste)."""
+        self._workspace = workspace
 
-        if not variable.get():
-            entry.insert(0, placeholder)
-            entry.configure(foreground=PALETTE["text_dim"])
+    def mark_backup_loaded(self, backup: RobotBackup) -> None:
+        """No-op — le chargement est reflété directement dans le panneau principal."""
 
-            def _clear(e: tk.Event) -> None:
-                if entry.get() == placeholder:
-                    entry.delete(0, "end")
-                    entry.configure(foreground=PALETTE["text"])
+    # ------------------------------------------------------------------
+    # Commandes
+    # ------------------------------------------------------------------
 
-            def _restore(e: tk.Event) -> None:
-                if not entry.get():
-                    entry.insert(0, placeholder)
-                    entry.configure(foreground=PALETTE["text_dim"])
-
-            entry.bind("<FocusIn>",  _clear)
-            entry.bind("<FocusOut>", _restore)
-
-        ttk.Button(frame, text="…", width=3, command=command).pack(
-            side="right", padx=(4, 0),
-        )
-        return entry
-
-
-    def _browse_input(self) -> None:
-        path = filedialog.askdirectory(title="Sélectionner le dossier source")
+    def _browse_workspace(self) -> None:
+        path = filedialog.askdirectory(title="Sélectionner le dossier workspace")
         if path:
-            self._input_var.set(path)
-            self._vm.set_input_dir(path)
+            self._ws_var.set(path)
 
-    def _start(self) -> None:
-        """Valide le dossier source puis lance l'extraction."""
-        raw = self._input_var.get().strip()
-        if not raw or not Path(raw).is_dir():
-            self._vm._emit_log(
-                "Veuillez sélectionner un dossier source valide.", "error",
-            )
+    def _scan(self) -> None:
+        path = self._ws_var.get().strip()
+        if not path or not Path(path).is_dir():
+            self._vm._emit_log("Veuillez sélectionner un dossier valide.", "error")  # noqa: SLF001
             return
-        self._vm.set_input_dir(raw)
-        self._vm.start_extraction()
+        self._vm.scan_workspace(path)
 
 
     def _export(self) -> None:
