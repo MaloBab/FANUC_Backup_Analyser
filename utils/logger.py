@@ -20,13 +20,11 @@ def setup_logger(level: int = logging.DEBUG) -> logging.Logger:
     root = logging.getLogger()
     root.setLevel(level)
 
-    # Console
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
     ch.setFormatter(fmt)
     root.addHandler(ch)
 
-    # Fichier rotatif (5 × 2 Mo)
     fh = logging.handlers.RotatingFileHandler(
         LOG_FILE, maxBytes=2 * 1024 * 1024, backupCount=5, encoding="utf-8"
     )

@@ -329,6 +329,7 @@ class DetailDialog(tk.Toplevel):
                     values=("", "", "", "", line),
                     tags=(child_tag,),
                 )
+                
 
 
 
