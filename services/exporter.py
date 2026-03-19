@@ -4,6 +4,16 @@ Supporte trois formats (Pattern Strategy) :
   csv      → une ligne par variable (résumé)
   csv_flat → une ligne par field ou par entrée de tableau (exhaustif)
   json     → structure complète
+
+Corrections appliquées
+──────────────────────
+- ``_SUPPORTED`` était désynchronisé du dict ``dispatch`` :
+  contenait ``{"csv", "label"}`` alors que les handlers réels sont
+  ``csv``, ``csv_flat`` et ``json``. Le format ``"label"`` n'avait pas de
+  handler et ``"csv_flat"``/``"json"`` étaient rejetés par la garde avant
+  d'atteindre le dispatch.
+  → ``_SUPPORTED`` est maintenant dérivé directement des clés du dict de
+  dispatch, garantissant une cohérence structurelle permanente.
 """
 
 from __future__ import annotations
@@ -11,6 +21,7 @@ import csv
 import json
 import logging
 from pathlib import Path
+from typing import Callable
 
 from models.fanuc_models import RobotVariable, RobotVarField, ArrayValue, _serialize_value
 
@@ -19,32 +30,59 @@ logger = logging.getLogger(__name__)
 
 _MAX_ND_DIMS = 7
 
+# Type interne d'une stratégie d'export
+_ExportFn = Callable[[list[RobotVariable], Path], None]
+
 
 class ExportError(Exception):
     pass
 
 
 class VariableExporter:
-    """Exporte une liste de RobotVariable vers CSV (résumé ou flat) ou JSON."""
+    """Exporte une liste de ``RobotVariable`` vers CSV (résumé ou flat) ou JSON.
 
-    _SUPPORTED = {"csv", "label"}
+    Les formats supportés sont définis par ``_DISPATCH`` ; la liste ``_SUPPORTED``
+    en est dérivée automatiquement — plus aucun risque de désynchronisation.
+    """
+
+    # Dispatch table — source de vérité unique des formats supportés.
+    # Ajouter un format = ajouter une entrée ici + écrire la méthode statique.
+    @classmethod
+    def _build_dispatch(cls) -> dict[str, _ExportFn]:
+        return {
+            "csv":      cls._csv_summary,
+            "csv_flat": cls._csv_flat,
+            "json":     cls._json,
+        }
 
     def export(self, variables: list[RobotVariable], path: Path, fmt: str = "csv") -> None:
         """Exporte les variables vers le fichier indiqué dans le format demandé.
 
         :param variables: liste de variables à exporter.
         :param path: chemin de destination (le dossier parent est créé si absent).
-        :param fmt: "csv", "label".
-        :raises ExportError: si le format n'est pas supporté.
+        :param fmt: ``"csv"``, ``"csv_flat"`` ou ``"json"``.
+        :raises ExportError: si le format n'est pas supporté ou si l'écriture échoue.
         """
         fmt = fmt.lower()
-        if fmt not in self._SUPPORTED:
-            raise ExportError(f"Format non supporté : {fmt!r}. Choix : {self._SUPPORTED}")
+        dispatch = self._build_dispatch()
+
+        if fmt not in dispatch:
+            supported = sorted(dispatch.keys())
+            raise ExportError(
+                f"Format non supporté : {fmt!r}. Formats disponibles : {supported}"
+            )
+
         path.parent.mkdir(parents=True, exist_ok=True)
-        dispatch = {"csv": self._csv_summary, "csv_flat": self._csv_flat, "json": self._json}
-        dispatch[fmt](variables, path)
+        try:
+            dispatch[fmt](variables, path)
+        except OSError as exc:
+            raise ExportError(f"Écriture impossible vers {path} : {exc}") from exc
+
         logger.info("Export %s → %s (%d vars)", fmt.upper(), path, len(variables))
 
+    # ------------------------------------------------------------------
+    # Stratégies d'export
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _csv_summary(variables: list[RobotVariable], path: Path) -> None:
@@ -76,7 +114,7 @@ class VariableExporter:
         """Une ligne par valeur scalaire — export exhaustif.
 
         Les index multidimensionnels sont répartis sur des colonnes séparées
-        index_1, index_2, … jusqu'à _MAX_ND_DIMS dimensions.
+        ``index_1``, ``index_2``, … jusqu'à ``_MAX_ND_DIMS`` dimensions.
         """
         idx_cols   = [f"index_{k}" for k in range(1, _MAX_ND_DIMS + 1)]
         fieldnames = [
@@ -93,7 +131,7 @@ class VariableExporter:
                         cells[f"index_{k}"] = str(v)
             return cells
 
-        def _base(var: RobotVariable) -> dict:
+        def _base(var: RobotVariable) -> dict[str, str]:
             return {
                 "namespace": var.namespace,
                 "variable":  var.name,
@@ -103,17 +141,13 @@ class VariableExporter:
 
         def _write_array(
             w: csv.DictWriter,
-            base: dict,
+            base: dict[str, str],
             field_name: str,
             type_detail: str,
             array: ArrayValue,
             nd_prefix: tuple[int, ...] | None = None,
         ) -> None:
-            """Écrit une ligne par entrée d'un ArrayValue.
-
-            La clé de chaque item est un tuple d'index (ex: (1,), (2, 3)).
-            Si nd_prefix est fourni (index du field parent), il est préfixé aux index.
-            """
+            """Écrit une ligne par entrée d'un ``ArrayValue``."""
             for item_key, item_val in array.items.items():
                 nd = (*(nd_prefix or ()), *item_key)
                 w.writerow({
@@ -124,9 +158,8 @@ class VariableExporter:
                     "value": item_val,
                 })
 
-        def _write_field(w: csv.DictWriter, base: dict, fld: RobotVarField) -> None:
+        def _write_field(w: csv.DictWriter, base: dict[str, str], fld: RobotVarField) -> None:
             """Écrit une ou plusieurs lignes pour un field."""
-            val = _serialize_value(fld.value)
             if isinstance(fld.value, ArrayValue):
                 _write_array(w, base, fld.field_name, fld.type_detail,
                              fld.value, nd_prefix=fld.parent_index_nd)
@@ -136,7 +169,7 @@ class VariableExporter:
                     "field": fld.field_name,
                     "type":  fld.type_detail,
                     **_idx_cells(fld.parent_index_nd),
-                    "value": val,
+                    "value": _serialize_value(fld.value),
                 })
 
         with path.open("w", newline="", encoding="utf-8") as f:
@@ -145,12 +178,16 @@ class VariableExporter:
             for var in variables:
                 base = _base(var)
                 if not var.fields:
-                    val = _serialize_value(var.value)
                     if isinstance(var.value, ArrayValue):
                         _write_array(w, base, "", var.type_detail, var.value)
                     else:
-                        w.writerow({**base, "field": "", "type": var.type_detail,
-                                    **_idx_cells(None), "value": val})
+                        w.writerow({
+                            **base,
+                            "field": "",
+                            "type":  var.type_detail,
+                            **_idx_cells(None),
+                            "value": _serialize_value(var.value),
+                        })
                 else:
                     for fld in var.fields:
                         _write_field(w, base, fld)

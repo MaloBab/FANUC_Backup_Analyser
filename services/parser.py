@@ -16,6 +16,13 @@ Cas de type_spec gérés
 6. Field scalaire       : ``Field: X.Y Access: RW: INTEGER = val``
 7. Field tableau        : ``Field: X.Y  ARRAY[N] OF TYPE`` + lignes ``[N] = val``
 8. Field POSITION       : ``Field: X.Y Access: RW: POSITION =`` + lignes Group/X/W…
+
+Corrections appliquées
+──────────────────────
+Tous les ``assert`` portant sur des données externes (contenu des fichiers .VA)
+ont été remplacés par des levées d'exceptions explicites (``ValueError`` /
+``TypeError``). Les ``assert`` sont désactivés avec ``python -O`` ; ils ne
+constituent donc pas une protection valide face à des fichiers malformés.
 """
 
 from __future__ import annotations
@@ -164,12 +171,18 @@ def _parse_nd_index(raw: str | None) -> tuple[int, ...] | None:
 
     :param raw: chaîne avec crochets capturée par la regex, ou ``None``.
     :returns: tuple des indices ``(i,)`` en 1D, ``(i, j, …)`` en N-D, ou ``None``.
+    :raises ValueError: si la chaîne produit un index vide après parsing
+                        (données malformées dans le fichier .VA).
     """
     if raw is None:
         return None
-    dims: tuple[int, ...] = tuple(int(d) for d in raw.strip("[]").split(",") if d)
-    assert len(dims) >= 1, f"Index vide inattendu : {raw!r}"
-    return dims
+    parts = [d for d in raw.strip("[]").split(",") if d]
+    if not parts:
+        raise ValueError(
+            f"Index vide inattendu dans le fichier .VA : {raw!r}. "
+            "La ligne est peut-être malformée."
+        )
+    return tuple(int(d) for d in parts)
 
 
 def _split_field_name(raw: str) -> tuple[str, tuple[int, ...] | None, str]:
@@ -195,13 +208,17 @@ def _split_field_name(raw: str) -> tuple[str, tuple[int, ...] | None, str]:
 def _parse_array_dims(type_spec: str) -> tuple[tuple[int, ...], int, str]:
     """Extrait les dimensions, la taille totale et le type interne d'un type tableau.
 
-    :param type_spec: chaîne de type_spec commençant par ``ARRAY[…]`` (ex: ``"ARRAY[4,200] OF TRACEDT_T"``).
-    :returns: triplet ``(shape, total_size, inner_type)`` où ``shape`` est le tuple de dimensions.
+    :param type_spec: chaîne de type_spec commençant par ``ARRAY[…]``
+                      (ex: ``"ARRAY[4,200] OF TRACEDT_T"``).
+    :returns: triplet ``(shape, total_size, inner_type)`` où ``shape`` est le
+              tuple de dimensions.
     :raises ValueError: si le format n'est pas reconnu.
     """
     bracket_start = type_spec.index("[") + 1
     bracket_end   = type_spec.index("]")
-    dims: tuple[int, ...] = tuple(int(d) for d in type_spec[bracket_start:bracket_end].split(",") if d)
+    dims: tuple[int, ...] = tuple(
+        int(d) for d in type_spec[bracket_start:bracket_end].split(",") if d
+    )
     size = 1
     for d in dims:
         size *= d
@@ -280,7 +297,14 @@ class VAParser:
             line = lines[i]
             m = _RE_VAR_HEADER.match(line)
             if m:
-                var, i = self._parse_variable(m, lines, i, va_path)
+                try:
+                    var, i = self._parse_variable(m, lines, i, va_path)
+                except (ValueError, TypeError) as exc:
+                    logger.warning(
+                        "Ligne %d ignorée dans %s : %s", i + 1, va_path.name, exc
+                    )
+                    i += 1
+                    continue
                 if var:
                     variables.append(var)
             else:
@@ -334,6 +358,9 @@ class VAParser:
         :param source: chemin du fichier source.
         :returns: tuple ``(variable, next_index)`` — ``next_index`` est la prochaine
                   ligne à traiter par la boucle principale.
+        :raises ValueError: si le fichier contient des données structurellement invalides.
+        :raises TypeError: si un invariant interne est violé (ne devrait pas se produire
+                           sur un fichier .VA bien formé).
         """
         namespace, name, raw_storage, raw_access, type_spec = header_match.groups()
         type_spec = type_spec.strip()
@@ -375,15 +402,15 @@ class VAParser:
             var.value = _scalar_value(raw_val)
 
         # Lecture des lignes suivantes
-        i                      = start + 1
-        current_array          : ArrayValue | None = None
-        current_array_is_pos   : bool             = False  # True si field ARRAY[N] OF POSITION
-        root_is_pos            : bool             = (  # True si variable racine ARRAY OF POSITION
+        i                    = start + 1
+        current_array        : ArrayValue | None = None
+        current_array_is_pos : bool              = False  # True si field ARRAY[N] OF POSITION
+        root_is_pos          : bool              = (      # True si variable racine ARRAY OF POSITION
             is_array and _is_position_array(type_spec)
         )
 
         while i < len(lines):
-            line    = lines[i]
+            line     = lines[i]
             stripped = line.strip()
 
             if _RE_VAR_HEADER.match(line):
@@ -418,7 +445,13 @@ class VAParser:
             if m:
                 f = self._make_field_array(m)
                 var.fields.append(f)
-                assert isinstance(f.value, ArrayValue)
+                # Invariant : _make_field_array initialise toujours value = ArrayValue()
+                if not isinstance(f.value, ArrayValue):
+                    raise TypeError(
+                        f"Invariant violé : ArrayValue attendu pour le field "
+                        f"'{f.full_name}' (ligne {i + 1} de {source.name}), "
+                        f"obtenu {type(f.value).__name__!r}."
+                    )
                 current_array        = f.value
                 current_array_is_pos = _is_position_array(f.type_detail)
                 i += 1
@@ -438,7 +471,13 @@ class VAParser:
             m = _RE_ARRAY_ITEM.match(stripped)
             if m:
                 key     = _parse_nd_index(f"[{m.group(1)}]")
-                assert key is not None
+                # _parse_nd_index lève ValueError si key est None/vide
+                # (données malformées) — propagé vers parse_file qui log et continue
+                if key is None:
+                    raise ValueError(
+                        f"Index N-D non résolu pour '{m.group(1)}' "
+                        f"(ligne {i + 1} de {source.name})."
+                    )
                 raw_val = m.group(2).strip()
 
                 is_pos_context = (
@@ -450,7 +489,6 @@ class VAParser:
                     # - Si raw_val est non vide (ex: "Uninitialized"), stocker comme scalaire
                     # - Sinon, collecter les lignes Group/X/W suivantes comme PositionValue
                     if raw_val:
-                        # Valeur scalaire inline (ex: "Uninitialized") — pas de lignes à collecter
                         scalar = _scalar_value(raw_val)
                         if current_array is not None:
                             current_array.items[key] = scalar

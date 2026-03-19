@@ -2,19 +2,35 @@
 Orchestrateur — Façade entre l'UI et les services métier.
 Coordonne le parsing (et à terme la conversion) sans que l'UI ne connaisse les détails.
 Pattern : Facade + Observer (via callbacks de progression).
+
+Corrections appliquées
+──────────────────────
+- ``_run_with_conversion`` : ajout du ``logger.error`` manquant sur les erreurs
+  de parsing (asymétrie avec ``_run_direct`` corrigée).
+
+Note sur le ``progress_cb``
+───────────────────────────
+Les callbacks de progression sont appelés depuis le thread worker (c'est
+intentionnel : l'orchestrateur n'a pas connaissance de Tkinter). La garantie
+de thread-safety est assurée par ``BackgroundWorker._progress_proxy`` qui
+intercepte le ``progress_cb`` et enfile les notifications dans la queue FIFO
+avant qu'elles ne soient délivrées au thread Tkinter via ``poll_result()``.
+L'orchestrateur n'a donc rien à changer de ce côté.
 """
 
 from __future__ import annotations
 import logging
 import subprocess
 import tempfile
-import threading
 import time
 from pathlib import Path
 from typing import Callable
 
 from config.settings import Settings
-from models.fanuc_models import ExtractionResult, ConversionResult, ConversionStatus, RobotBackup, WorkspaceResult
+from models.fanuc_models import (
+    ExtractionResult, ConversionResult, ConversionStatus,
+    RobotBackup, WorkspaceResult,
+)
 from services.parser import VAParser
 from services.exporter import VariableExporter
 
@@ -42,7 +58,7 @@ class ExtractionOrchestrator:
         input_dir: Path,
         output_dir: Path | None = None,
         progress_cb: ProgressCallback | None = None,
-        skip_conversion: bool = True
+        skip_conversion: bool = True,
     ) -> ExtractionResult:
         """Lance le pipeline d'extraction.
 
@@ -64,7 +80,6 @@ class ExtractionOrchestrator:
         :param fmt: ``"csv"``, ``"csv_flat"`` ou ``"json"``.
         """
         self._exporter.export(result.variables, output_path, fmt)
-
 
     def scan_workspace(self, root_path: Path) -> WorkspaceResult:
         """Scanne un dossier racine et détecte les sous-dossiers contenant des .VA.
@@ -90,8 +105,10 @@ class ExtractionOrchestrator:
             for sub in candidates:
                 result.backups.append(RobotBackup(name=sub.name, path=sub))
 
-        logger.info("Workspace scanné : %d robot(s) trouvé(s) dans %s",
-                    len(result.backups), root_path)
+        logger.info(
+            "Workspace scanné : %d robot(s) trouvé(s) dans %s",
+            len(result.backups), root_path,
+        )
         return result
 
     def load_backup(
@@ -169,7 +186,9 @@ class ExtractionOrchestrator:
                 try:
                     result.variables.extend(self._parser.parse_file(va_path))
                 except Exception as exc:
+                    # ← logger.error ajouté (asymétrie corrigée par rapport à _run_direct)
                     result.errors.append(f"{va_path.name}: {exc}")
+                    logger.error("Parsing Error %s : %s", va_path.name, exc)
 
         for r in conversion_results:
             if r.status == ConversionStatus.FAILED:
