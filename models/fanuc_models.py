@@ -6,6 +6,14 @@ Convention sur ``FieldValue`` :
   - ``ArrayValue``   : tableau indexé — items scalaires ou ``PositionValue`` (``ARRAY OF POSITION``)
   - ``PositionValue``: position cartésienne/articulaire multilignes (variable scalaire POSITION)
   - ``None``         : absence de valeur (variable non encore parsée ou sans bloc de valeur)
+
+Modification
+────────────
+``PositionValue`` reçoit un champ ``label: str`` (défaut ``""``) qui stocke le nom
+de la position tel qu'il apparaît dans le fichier .VA entre apostrophes, par exemple
+``'OR_Get_Ref'`` ou ``''`` pour une position sans nom.
+Ce label est utilisé par le renderer pour afficher une preview significative au lieu
+de ``[N lignes]``.
 """
 
 from __future__ import annotations
@@ -62,12 +70,23 @@ class ArrayValue:
 
 @dataclass
 class PositionValue:
-    """Position FANUC multilignes (Group/Config/X/Y/Z/W/P/R)."""
+    """Position FANUC multilignes (Group/Config/X/Y/Z/W/P/R ou J1..J9).
+
+    ``label`` stocke le nom entre apostrophes tel qu'il apparaît dans le fichier .VA,
+    par exemple ``"OR_Get_Ref"`` ou ``""`` pour une position sans nom.
+    Ce champ est utilisé par le renderer pour afficher une preview significative.
+    """
 
     raw_lines: list[str] = field(default_factory=list)
+    label:     str       = ""
 
     def __repr__(self) -> str:
         return " | ".join(self.raw_lines)
+
+    @property
+    def display_label(self) -> str:
+        """Label d'affichage : nom de la position si disponible, sinon chaîne vide."""
+        return self.label
 
 
 ScalarValue = str | None
@@ -175,22 +194,13 @@ class ExtractionResult:
         return sum(len(v.fields) for v in self.variables)
 
 
-
-
 # ---------------------------------------------------------------------------
 # Navigation multi-backups
 # ---------------------------------------------------------------------------
 
 @dataclass
 class RobotBackup:
-    """Représente un backup robot : un sous-dossier contenant des fichiers .VA.
-
-    :param name:      nom du dossier (= identifiant du robot).
-    :param path:      chemin absolu du dossier.
-    :param variables: variables parsées (vide jusqu'au premier chargement).
-    :param errors:    erreurs de parsing éventuelles.
-    :param loaded:    ``True`` si le parsing a déjà été effectué.
-    """
+    """Représente un backup robot : un sous-dossier contenant des fichiers .VA."""
     name:      str
     path:      Path
     variables: list[RobotVariable] = field(default_factory=list)
@@ -208,11 +218,7 @@ class RobotBackup:
 
 @dataclass
 class WorkspaceResult:
-    """Résultat d'un scan de dossier racine multi-robots.
-
-    :param root_path: dossier racine sélectionné par l'utilisateur.
-    :param backups:   liste des backups trouvés (un par sous-dossier avec .VA).
-    """
+    """Résultat d'un scan de dossier racine multi-robots."""
     root_path: Path
     backups:   list[RobotBackup] = field(default_factory=list)
 
@@ -223,6 +229,7 @@ class WorkspaceResult:
     @property
     def loaded_count(self) -> int:
         return sum(1 for b in self.backups if b.loaded)
+
 
 # ---------------------------------------------------------------------------
 # Modèles de conversion

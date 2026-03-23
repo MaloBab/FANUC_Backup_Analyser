@@ -64,7 +64,7 @@ class PageRenderer:
                 values=("⏳  Chargement en cours…", "", "", "", ""),
                 iid="_loading", tags=("loading",),
             )
-            return  # l'appelant déclenche le chargement
+            return
 
         self._tree.configure_columns([
             ("col1", "NS",       70, "center", False),
@@ -117,7 +117,6 @@ class PageRenderer:
         self._tree.clear()
 
         if var.fields:
-            # Afficher uniquement les fields directs (parent_var == var.name)
             items = [f for f in var.fields if f.parent_var == var.name]
             if query:
                 items = [f for f in items
@@ -137,13 +136,6 @@ class PageRenderer:
         fields: list[RobotVarField],
         source_all: list[RobotVarField] | None = None,
     ) -> None:
-        """Sous-fields d'un ARRAY OF STRUCT.
-
-        :param fields:     fields à afficher (fils directs).
-        :param source_all: tous les fields de la variable source,
-                           nécessaires pour compter les sous-éléments
-                           des ARRAY OF STRUCT imbriqués.
-        """
         self._tree.configure_columns([
             ("col1", "Index",   90, "center", False),
             ("col2", "Field",  220, "w",      False),
@@ -157,7 +149,6 @@ class PageRenderer:
             items = [f for f in fields
                      if query in f.field_name.lower()
                      or query in f.type_detail.lower()]
-        # all_fields pour le comptage des sous-éléments imbriqués
         all_fields = source_all if source_all is not None else fields
         self._tree.clear()
         for i, fld in enumerate(items):
@@ -236,7 +227,6 @@ class PageRenderer:
         elif val.startswith("[") and val.endswith("]"):
             tags.append("nav")
 
-        # Type adaptatif : ne pas appliquer inner_type sur les champs tableau eux-mêmes
         is_scalar_child = (
             fld.parent_index_nd is not None
             and not fld.type_detail.upper().startswith("ARRAY")

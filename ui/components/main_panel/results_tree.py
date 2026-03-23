@@ -3,6 +3,13 @@ ResultsTree — treeview de résultats avec scrollbars.
 
 Composant pur d'affichage : reçoit des données formatées,
 ne connaît pas les modèles métier.
+
+Correction
+──────────
+Les binds ``<Double-1>`` et ``<Return>`` étaient posés sur ``self`` (le
+``tk.Frame`` wrapper) au lieu de ``self._tree`` (le ``ttk.Treeview`` interne).
+Un double-clic sur une ligne du Treeview ne remontait donc jamais au Frame
+— le callback ``on_activate`` n'était jamais déclenché.
 """
 
 from __future__ import annotations
@@ -20,7 +27,6 @@ _ColSpec  = list[tuple[str, str, int, str, bool]]   # (id, heading, width, ancho
 class ResultsTree(tk.Frame):
     """Treeview à colonnes dynamiques + scrollbars + tags visuels."""
 
-    # Colonnes par défaut (5) — extensible dynamiquement
     DEFAULT_COLUMNS = ("col1", "col2", "col3", "col4", "col5")
 
     def __init__(
@@ -70,6 +76,9 @@ class ResultsTree(tk.Frame):
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
 
+        # FIX — bind sur self._tree (ttk.Treeview) et non sur self (tk.Frame).
+        # Le double-clic sur une ligne Treeview ne remonte pas au Frame parent,
+        # donc le callback on_activate n'était jamais déclenché.
         self._tree.bind("<Double-1>", self._on_event)
         self._tree.bind("<Return>",   self._on_event)
 
@@ -78,10 +87,7 @@ class ResultsTree(tk.Frame):
     # ------------------------------------------------------------------
 
     def configure_columns(self, spec: _ColSpec) -> None:
-        """Reconfigure les colonnes (id, heading, width, anchor, stretch).
-
-        Ajuste aussi le nombre de colonnes si nécessaire.
-        """
+        """Reconfigure les colonnes (id, heading, width, anchor, stretch)."""
         col_ids = tuple(c[0] for c in spec)
         self._tree["columns"] = col_ids
         for col_id, heading, width, anchor, stretch in spec:

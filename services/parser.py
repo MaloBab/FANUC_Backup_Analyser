@@ -5,6 +5,7 @@ Formats de variables gérés
 ──────────────────────────
 Variables système  : ``[*SYSTEM*]$NOM  Storage: X  Access: Y  : <type_spec>``
 Variables Karel    : ``[NAMESPACE]NOM   Storage: X  Access: Y  : <type_spec>``
+Variables posreg   : ``[*POSREG*]$NOM  Storage: X  Access: Y  : <type_spec>``
 
 Cas de type_spec gérés
 ──────────────────────
@@ -16,13 +17,19 @@ Cas de type_spec gérés
 6. Field scalaire       : ``Field: X.Y Access: RW: INTEGER = val``
 7. Field tableau        : ``Field: X.Y  ARRAY[N] OF TYPE`` + lignes ``[N] = val``
 8. Field POSITION       : ``Field: X.Y Access: RW: POSITION =`` + lignes Group/X/W…
+9. Tableau de positions : ``ARRAY[1,300] OF Position Reg`` + lignes ``[N,M] = 'label'``
+                          suivi de Group:/X:/W: ou J1=/J2=… (articulaire)
 
 Corrections appliquées
 ──────────────────────
-Tous les ``assert`` portant sur des données externes (contenu des fichiers .VA)
-ont été remplacés par des levées d'exceptions explicites (``ValueError`` /
-``TypeError``). Les ``assert`` sont désactivés avec ``python -O`` ; ils ne
-constituent donc pas une protection valide face à des fichiers malformés.
+- _RE_TYPE_ARRAY : (\\S+) → (.+)$ pour capturer les types avec espace (ex: "Position Reg")
+- _is_position_array : inner.split()[0] → inner (garde le type complet) + "POSITION REG"
+  ajouté à _ARRAY_OF_POSITION_TYPES
+- _RE_POSITION_LINE : J\\d+\\s*= ajouté pour les positions articulaires (J1..J9)
+- Branche is_pos_context : _RE_POS_LABEL détecte les labels 'texte' sur les lignes
+  d'index et les traite comme valeur vide → collecte des lignes multiligne suivantes
+- Tous les ``assert`` portant sur des données externes ont été remplacés par des
+  levées d'exceptions explicites (``ValueError`` / ``TypeError``).
 """
 
 from __future__ import annotations
@@ -45,7 +52,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # En-tête unifié : [NAMESPACE]NOM  Storage: X  Access: Y  : <type_spec>
-# Couvre *SYSTEM* et tout namespace Karel (TBSWMD45, etc.)
+# Couvre *SYSTEM*, *POSREG* et tout namespace Karel (TBSWMD45, etc.)
 _RE_VAR_HEADER = re.compile(
     r"^\[([^\]]+)\]"                 # [namespace]  (tout sauf ])
     r"(\$?[\w.]+)"                   # nom (optionnellement préfixé $, peut contenir des points)
@@ -82,13 +89,32 @@ _RE_FIELD_POSITION = re.compile(
 # Ligne ``[N] = val`` ou ``[N,M] = val`` dans un tableau
 _RE_ARRAY_ITEM = re.compile(r"^\s*\[([\d,]+)\]\s*=\s*(.*)$")
 
-# type_spec : tableau N-D
-_RE_TYPE_ARRAY  = re.compile(r"^ARRAY\[[\d,]+\]\s+OF\s+(\S+)")
+# FIX 1 — type_spec tableau N-D : (.+)$ au lieu de (\S+) pour capturer
+# les types avec espace comme "Position Reg"
+_RE_TYPE_ARRAY  = re.compile(r"^ARRAY\[[\d,]+\]\s+OF\s+(.+)$")
+
 # type_spec : scalaire avec valeur inline optionnelle
 _RE_TYPE_SCALAR = re.compile(r"^(\w+(?:\[\d+\])?)(?:\s*=\s*(.*))?$")
 
-# Lignes de position (Group/Config/coordonnées)
-_RE_POSITION_LINE = re.compile(r"^\s*(Group:|Config:|X:|Y:|Z:|W:|P:|R:|\[)")
+# FIX 3 — Lignes de position (Group/Config/coordonnées cartésiennes ET articulaires)
+# J\d+\s*= couvre J1 =, J2 =, …, J9 = (positions articulaires FANUC)
+_RE_POSITION_LINE = re.compile(r"^\s*(Group:|Config:|X:|Y:|Z:|W:|P:|R:|J\d+\s*=|\[)")
+
+# FIX 2 — Label de position sur une ligne d'index.
+#
+# Formes rencontrées dans posreg.va :
+#   [1,3]  = 'OR_Get_Ref'        → label seul, lignes multiligne suivent
+#   [1,1]  = ''   Group: 1       → label vide + contenu inline (ignoré), multilignes suivent
+#   [1,2]  = '' Uninitialized    → label vide + Uninitialized → stocker comme scalaire
+#
+# Le regex capture :  groupe 1 = label (entre apostrophes)
+#                     groupe 2 = suffix éventuel après les apostrophes (stripped)
+#
+# Règle d'interprétation :
+#   - suffix == "Uninitialized"  → stocker "Uninitialized" comme scalaire
+#   - suffix vide ou autre       → traiter comme valeur vide, lire les multilignes
+#     (le suffix inline comme "Group: 1" est redondant avec les lignes suivantes)
+_RE_POS_LABEL = re.compile(r"^'([^']*)'\s*(.*)$")
 
 # Décomposition d'un nom de field brut en (parent, [index], field_name)
 # Ex: ``$AP_CUREQ[1].$PANE_EQNO``  → ``$AP_CUREQ``, ``[1]``,   ``$PANE_EQNO``
@@ -135,7 +161,8 @@ def _parse_datatype(raw: str) -> VADataType:
     La comparaison ignore la partie dimensionnelle (ex: ``STRING[37]`` → ``STRING``).
     Les types commençant par une majuscule non reconnue sont classés ``STRUCT``.
 
-    :param raw: type brut extrait du fichier .VA (ex: ``"INTEGER"``, ``"ALMDG_T"``, ``"STRING[37]"``).
+    :param raw: type brut extrait du fichier .VA (ex: ``"INTEGER"``, ``"ALMDG_T"``,
+                ``"STRING[37]"``, ``"Position Reg"``).
     :returns: membre ``VADataType`` correspondant, ``VADataType.STRUCT`` pour les types
               utilisateur inconnus, ou ``VADataType.UNKNOWN`` en dernier recours.
     """
@@ -209,7 +236,8 @@ def _parse_array_dims(type_spec: str) -> tuple[tuple[int, ...], int, str]:
     """Extrait les dimensions, la taille totale et le type interne d'un type tableau.
 
     :param type_spec: chaîne de type_spec commençant par ``ARRAY[…]``
-                      (ex: ``"ARRAY[4,200] OF TRACEDT_T"``).
+                      (ex: ``"ARRAY[4,200] OF TRACEDT_T"``,
+                           ``"ARRAY[1,300] OF Position Reg"``).
     :returns: triplet ``(shape, total_size, inner_type)`` où ``shape`` est le
               tuple de dimensions.
     :raises ValueError: si le format n'est pas reconnu.
@@ -236,39 +264,51 @@ def _parse_array_dims(type_spec: str) -> tuple[tuple[int, ...], int, str]:
 _POSITION_TYPES: frozenset[str] = frozenset({
     "POSITION",
     "XYZWPR",
-    "XYZWPREXT",   # NON — XYZWPREXT est un tableau de scalaires, pas de positions
+    "XYZWPREXT",
     "JOINTPOS",
     "JOINTPOS9",
 })
-# Note : XYZWPREXT a le format [N] = Uninitialized (scalaire), pas Group:/X:/W:
-# Seuls POSITION et XYZWPR ont le format multiligne Group:/X:/Y:/Z:/W:/P:/R:
-_ARRAY_OF_POSITION_TYPES: frozenset[str] = frozenset({"POSITION", "XYZWPR", "XYZWPREXT"})
+
+# FIX 1 — "POSITION REG" ajouté : type des registres de position posreg.va
+# (ARRAY[1,300] OF Position Reg). Les items ont le format multiligne
+# Group:/X:/W: (cartésien) ou J1=/J2=… (articulaire).
+_ARRAY_OF_POSITION_TYPES: frozenset[str] = frozenset({
+    "POSITION",
+    "XYZWPR",
+    "XYZWPREXT",
+    "POSITION REG",
+})
 
 
 def _is_position_array(type_detail: str) -> bool:
     """Retourne True si type_detail est un ARRAY dont les items sont des positions multilignes.
 
-    Seuls POSITION et XYZWPR ont le format :
-        [N] =
-        Group: ...
-        X: ...  Y: ...  Z: ...
-        W: ...  P: ...  R: ...
+    Gère les types avec espace (ex: ``"ARRAY[1,300] OF Position Reg"``).
 
-    XYZWPREXT, JOINTPOS et les types struct ont un format différent.
+    Les types reconnus comme positions multilignes :
+      - POSITION, XYZWPR, XYZWPREXT  → format Group:/X:/Y:/Z:/W:/P:/R:
+      - POSITION REG                  → format cartésien ou articulaire (J1=/J2=…)
+
+    JOINTPOS et les types struct ont un format différent et ne sont pas inclus ici.
     """
     upper = type_detail.upper()
     if " OF " not in upper:
         return False
-    inner = upper.split(" OF ", 1)[-1].strip().split()[0]
+    # FIX 1 — on garde le type interne complet (avec espace éventuel)
+    # pour matcher "POSITION REG" ; l'ancien .split()[0] tronquait à "POSITION"
+    # ce qui donnait un faux positif pour POSITION seul mais ratait "POSITION REG"
+    # (les deux donnaient le même résultat avant, mais le frozenset étendu
+    # nécessite la chaîne complète pour distinguer les variantes futures)
+    inner = upper.split(" OF ", 1)[-1].strip()
     return inner in _ARRAY_OF_POSITION_TYPES
 
 
 class VAParser:
     """Parse les fichiers .VA FANUC et retourne une liste de ``RobotVariable``.
 
-    Supporte les variables système (``[*SYSTEM*]``) et les variables Karel
-    (``[NAMESPACE]``) dans un format unifié. Implémente un automate ligne
-    par ligne sans regex multilignes.
+    Supporte les variables système (``[*SYSTEM*]``), les registres de position
+    (``[*POSREG*]``) et les variables Karel (``[NAMESPACE]``) dans un format unifié.
+    Implémente un automate ligne par ligne sans regex multilignes.
     """
 
     def parse_file(self, va_path: Path) -> list[RobotVariable]:
@@ -349,7 +389,7 @@ class VAParser:
         """Parse une variable complète depuis son en-tête jusqu'au début de la suivante.
 
         Implémente un automate à états qui consomme les lignes suivant l'en-tête
-        pour reconstituer la valeur ou les fields. Gère les 8 cas documentés dans
+        pour reconstituer la valeur ou les fields. Gère les 9 cas documentés dans
         le module.
 
         :param header_match: résultat de ``_RE_VAR_HEADER.match()`` sur la ligne d'en-tête.
@@ -471,8 +511,6 @@ class VAParser:
             m = _RE_ARRAY_ITEM.match(stripped)
             if m:
                 key     = _parse_nd_index(f"[{m.group(1)}]")
-                # _parse_nd_index lève ValueError si key est None/vide
-                # (données malformées) — propagé vers parse_file qui log et continue
                 if key is None:
                     raise ValueError(
                         f"Index N-D non résolu pour '{m.group(1)}' "
@@ -485,10 +523,62 @@ class VAParser:
                     or (current_array is None and root_is_pos)
                 )
                 if is_pos_context:
-                    # Cas ARRAY[N] OF POSITION / XYZWPR / XYZWPREXT :
-                    # - Si raw_val est non vide (ex: "Uninitialized"), stocker comme scalaire
-                    # - Sinon, collecter les lignes Group/X/W suivantes comme PositionValue
-                    if raw_val:
+                    # FIX 2 — Détecter les labels de position sur la ligne d'index.
+                    #
+                    # Formes rencontrées :
+                    #   raw_val = "'OR_Get_Ref'"       → label seul   → multiligne
+                    #   raw_val = "''   Group: 1"      → label+inline → multiligne
+                    #                                    (inline ignoré, lignes suivantes lues)
+                    #   raw_val = "'' Uninitialized"   → label+uninit → scalaire "Uninitialized"
+                    #   raw_val = "Uninitialized"      → scalaire pur → scalaire "Uninitialized"
+                    #   raw_val = ""                   → vide         → multiligne
+                    #
+                    # _RE_POS_LABEL matche tout raw_val commençant par '...' et capture
+                    # le suffix après les apostrophes (stripped).
+                    m_label = _RE_POS_LABEL.match(raw_val) if raw_val else None
+
+                    if m_label:
+                        pos_label = m_label.group(1)   # texte entre les apostrophes
+                        suffix    = m_label.group(2).strip()
+                        if suffix == "Uninitialized":
+                            # '' Uninitialized → stocker comme scalaire
+                            scalar = "Uninitialized"
+                            if current_array is not None:
+                                current_array.items[key] = scalar
+                            else:
+                                if not isinstance(var.value, ArrayValue):
+                                    var.value = ArrayValue()
+                                var.value.items[key] = scalar
+                            i += 1
+                        else:
+                            # Label seul ('OR_Get_Ref') ou label + contenu inline.
+                            # Cas particulier : [1,1] = ''   Group: 1
+                            # Le suffix "Group: 1" est une ligne de position à part
+                            # entière — on l'injecte en tête de raw_lines pour ne
+                            # pas le perdre, avant de lire les lignes suivantes.
+                            i += 1
+                            arr_pos_lines: list[str] = []
+                            if suffix and _RE_POSITION_LINE.match(suffix):
+                                arr_pos_lines.append(suffix)
+                            while i < len(lines):
+                                pl = lines[i].strip()
+                                if (not pl
+                                        or _RE_VAR_HEADER.match(lines[i])
+                                        or pl.startswith("Field:")
+                                        or _RE_ARRAY_ITEM.match(pl)):
+                                    break
+                                if _RE_POSITION_LINE.match(pl):
+                                    arr_pos_lines.append(pl)
+                                i += 1
+                            pos_val = PositionValue(raw_lines=arr_pos_lines, label=pos_label)
+                            if current_array is not None:
+                                current_array.items[key] = pos_val
+                            else:
+                                if not isinstance(var.value, ArrayValue):
+                                    var.value = ArrayValue()
+                                var.value.items[key] = pos_val
+                    elif raw_val:
+                        # Scalaire pur sans label (ex: "Uninitialized", valeur numérique)
                         scalar = _scalar_value(raw_val)
                         if current_array is not None:
                             current_array.items[key] = scalar
@@ -498,9 +588,9 @@ class VAParser:
                             var.value.items[key] = scalar
                         i += 1
                     else:
-                        # Valeur multiligne (Group:/X:/W:) → PositionValue
+                        # raw_val vide → collecter lignes multiligne suivantes
                         i += 1
-                        arr_pos_lines: list[str] = []
+                        arr_pos_lines = []
                         while i < len(lines):
                             pl = lines[i].strip()
                             if (not pl
