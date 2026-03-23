@@ -5,6 +5,7 @@ import tkinter as tk
 
 from config.settings import Settings
 from models.fanuc_models import RobotBackup, WorkspaceResult
+from models.search_models import SearchResults
 from ui.theme import apply_theme
 from ui.components.header import HeaderBar
 from ui.components.sidebar import SidebarPanel
@@ -15,10 +16,9 @@ from ui.viewmodel import AppViewModel
 
 class App:
     def __init__(self, root: tk.Tk, settings: Settings) -> None:
-        self._root = root
-        self._settings = settings
+        self._root      = root
+        self._settings  = settings
         self._viewmodel = AppViewModel(settings)
-
         self._configure_root()
         apply_theme(self._root)
         self._build_layout()
@@ -33,8 +33,6 @@ class App:
 
     def _build_layout(self) -> None:
         vm = self._viewmodel
-
-        # Header avec navigation intégrée
         self._header = HeaderBar(
             self._root,
             on_back=self._on_nav_back,
@@ -44,7 +42,6 @@ class App:
         )
         self._header.grid(row=0, column=0, sticky="ew")
 
-        # Zone centrale : sidebar + panneau principal
         center = tk.Frame(self._root)
         center.grid(row=1, column=0, sticky="nsew")
         center.columnconfigure(1, weight=1)
@@ -56,16 +53,10 @@ class App:
         self._main = MainPanel(center, vm)
         self._main.grid(row=0, column=1, sticky="nsew")
 
-        # Barre de statut
         self._statusbar = StatusBar(self._root, vm)
         self._statusbar.grid(row=2, column=0, sticky="ew")
 
-        # Injection de la référence HeaderBar dans MainPanel
         self._main.set_header(self._header)
-
-    # ------------------------------------------------------------------
-    # Navigation (délégue au MainPanel)
-    # ------------------------------------------------------------------
 
     def _on_nav_back(self) -> None:
         self._main.navigate_back()
@@ -76,10 +67,6 @@ class App:
     def _on_breadcrumb_click(self, index: int) -> None:
         self._main.navigate_to_index(index)
 
-    # ------------------------------------------------------------------
-    # Callbacks ViewModel → UI
-    # ------------------------------------------------------------------
-
     def _on_workspace_ready(self, workspace: WorkspaceResult) -> None:
         self._sidebar.populate_workspace(workspace)
         self._main.display_workspace(workspace)
@@ -87,6 +74,9 @@ class App:
     def _on_backup_loaded(self, backup: RobotBackup) -> None:
         self._sidebar.mark_backup_loaded(backup)
         self._main.refresh_screen()
+
+    def _on_search_results(self, results: SearchResults) -> None:
+        self._main.display_search_results(results)
 
     def _bind_viewmodel(self) -> None:
         self._viewmodel.set_tk_root(self._root)
@@ -96,3 +86,4 @@ class App:
         self._viewmodel.on_scope_change    = self._main.set_scope_filter
         self._viewmodel.on_workspace_ready = self._on_workspace_ready
         self._viewmodel.on_backup_loaded   = self._on_backup_loaded
+        self._viewmodel.on_search_results  = self._on_search_results

@@ -11,6 +11,7 @@ from models.fanuc_models import (
     ArrayValue, PositionValue, RobotBackup, RobotVarField,
     RobotVariable, WorkspaceResult,
 )
+from models.search_models import SearchResults
 from ui.components.main_panel._helpers import (
     display_value, field_value_preview, index_str, inner_type,
 )
@@ -174,6 +175,43 @@ class PageRenderer:
         ])
         self._tree.clear()
         self.render_position_lines(pos)
+
+    def render_search_results(self, results: SearchResults) -> None:
+        """Page de résultats de recherche globale.
+
+        Colonnes : Backup | Fichier | Variable | Chemin | Valeur
+        Chaque ligne est taguée ``nav`` : double-clic navigue vers la variable.
+        """
+        self._tree.configure_columns([
+            ("col1", "Backup",   140, "w",      False),
+            ("col2", "Fichier",  110, "w",      False),
+            ("col3", "Variable", 160, "w",      False),
+            ("col4", "Chemin",   210, "w",      True),
+            ("col5", "Valeur",   150, "w",      False),
+        ])
+        self._tree.clear()
+
+        for i, hit in enumerate(results.hits):
+            tags: list[str] = ["even" if i % 2 == 0 else "odd", "nav"]
+            val_disp = (hit.match_value or "—")[:80]
+            if val_disp == "Uninitialized":
+                tags.append("uninit")
+            self._tree.insert(
+                values=(
+                    hit.backup_name,
+                    hit.source_file,
+                    hit.variable_name,
+                    hit.match_path[:80],
+                    val_disp,
+                ),
+                iid=f"hit_{id(hit)}",
+                tags=tuple(tags),
+            )
+
+        msg = f"{results.hit_count} résultat(s)"
+        if results.hit_count >= 2000:
+            msg += "  (limite atteinte)"
+        self._filters.set_count(msg)
 
     # ------------------------------------------------------------------
     # Helpers de rendu bas niveau
