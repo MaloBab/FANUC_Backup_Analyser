@@ -102,16 +102,21 @@ class RobotVarField:
       - ``(i,)``   : tableau 1D, élément ``i``
       - ``(i, j)`` : tableau 2D, élément ``[i, j]``
       - etc.
+
+    ``condition_handler`` est optionnel et n'est renseigné que par le
+    ``DataIdCsvParser`` (colonne ``ConditionHandler`` du DATAID.CSV).
+    Il vaut ``""`` pour toutes les variables issues des fichiers .VA.
     """
 
-    full_name:       str                        # nom complet tel qu'il apparaît dans le .VA
-    parent_var:      str                        # variable parente (ex: ``"$AP_CUREQ"``, ``"NFPAM.TBC"``)
-    field_name:      str                        # nom du field seul (ex: ``"$PANE_EQNO"``, ``"CNT_SCALE"``)
-    access:          AccessType
-    data_type:       VADataType
-    type_detail:     str                        # type brut (ex: ``"SHORT"``, ``"ARRAY[9] OF BYTE"``)
-    value:           FieldValue
-    parent_index_nd: tuple[int, ...] | None = None
+    full_name:         str                        # nom complet tel qu'il apparaît dans le .VA
+    parent_var:        str                        # variable parente (ex: ``"$AP_CUREQ"``, ``"NFPAM.TBC"``)
+    field_name:        str                        # nom du field seul (ex: ``"$PANE_EQNO"``, ``"CNT_SCALE"``)
+    access:            AccessType
+    data_type:         VADataType
+    type_detail:       str                        # type brut pur (ex: ``"SHORT"``, ``"ARRAY[9] OF BYTE"``)
+    value:             FieldValue
+    parent_index_nd:   tuple[int, ...] | None = None
+    condition_handler: str                    = ""
 
     @property
     def parent_index(self) -> int | None:
@@ -272,7 +277,7 @@ def _serialize_value(value: FieldValue) -> object:
 
 
 def _field_to_dict(f: RobotVarField) -> dict:
-    return {
+    d = {
         "full_name":       f.full_name,
         "field_name":      f.field_name,
         "parent_index_nd": list(f.parent_index_nd) if f.parent_index_nd is not None else None,
@@ -280,3 +285,6 @@ def _field_to_dict(f: RobotVarField) -> dict:
         "type":            f.type_detail,
         "value":           _serialize_value(f.value),
     }
+    if f.condition_handler:
+        d["condition_handler"] = f.condition_handler
+    return d

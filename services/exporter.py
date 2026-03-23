@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 _MAX_ND_DIMS = 7
 
-# Type interne d'une stratégie d'export
 _ExportFn = Callable[[list[RobotVariable], Path], None]
 
 
@@ -45,8 +44,6 @@ class VariableExporter:
     en est dérivée automatiquement — plus aucun risque de désynchronisation.
     """
 
-    # Dispatch table — source de vérité unique des formats supportés.
-    # Ajouter un format = ajouter une entrée ici + écrire la méthode statique.
     @classmethod
     def _build_dispatch(cls) -> dict[str, _ExportFn]:
         return {
@@ -115,15 +112,16 @@ class VariableExporter:
 
         Les index multidimensionnels sont répartis sur des colonnes séparées
         ``index_1``, ``index_2``, … jusqu'à ``_MAX_ND_DIMS`` dimensions.
+        La colonne ``condition`` contient le ConditionHandler DATAID.CSV ;
+        elle est vide pour les variables issues de fichiers .VA.
         """
         idx_cols   = [f"index_{k}" for k in range(1, _MAX_ND_DIMS + 1)]
         fieldnames = [
             "namespace", "variable", "storage", "access",
-            "field", "type",
+            "field", "type", "condition",
         ] + idx_cols + ["value"]
 
         def _idx_cells(nd: tuple[int, ...] | None) -> dict[str, str]:
-            """Répartit un index N-D sur les colonnes index_1…index_N."""
             cells: dict[str, str] = {c: "" for c in idx_cols}
             if nd:
                 for k, v in enumerate(nd, start=1):
@@ -144,32 +142,36 @@ class VariableExporter:
             base: dict[str, str],
             field_name: str,
             type_detail: str,
+            condition: str,
             array: ArrayValue,
             nd_prefix: tuple[int, ...] | None = None,
         ) -> None:
-            """Écrit une ligne par entrée d'un ``ArrayValue``."""
             for item_key, item_val in array.items.items():
                 nd = (*(nd_prefix or ()), *item_key)
                 w.writerow({
                     **base,
-                    "field": field_name,
-                    "type":  type_detail,
+                    "field":     field_name,
+                    "type":      type_detail,
+                    "condition": condition,
                     **_idx_cells(nd),
-                    "value": item_val,
+                    "value":     item_val,
                 })
 
         def _write_field(w: csv.DictWriter, base: dict[str, str], fld: RobotVarField) -> None:
-            """Écrit une ou plusieurs lignes pour un field."""
             if isinstance(fld.value, ArrayValue):
-                _write_array(w, base, fld.field_name, fld.type_detail,
-                             fld.value, nd_prefix=fld.parent_index_nd)
+                _write_array(
+                    w, base,
+                    fld.field_name, fld.type_detail, fld.condition_handler,
+                    fld.value, nd_prefix=fld.parent_index_nd,
+                )
             else:
                 w.writerow({
                     **base,
-                    "field": fld.field_name,
-                    "type":  fld.type_detail,
+                    "field":     fld.field_name,
+                    "type":      fld.type_detail,
+                    "condition": fld.condition_handler,
                     **_idx_cells(fld.parent_index_nd),
-                    "value": _serialize_value(fld.value),
+                    "value":     _serialize_value(fld.value),
                 })
 
         with path.open("w", newline="", encoding="utf-8") as f:
@@ -179,14 +181,15 @@ class VariableExporter:
                 base = _base(var)
                 if not var.fields:
                     if isinstance(var.value, ArrayValue):
-                        _write_array(w, base, "", var.type_detail, var.value)
+                        _write_array(w, base, "", var.type_detail, "", var.value)
                     else:
                         w.writerow({
                             **base,
-                            "field": "",
-                            "type":  var.type_detail,
+                            "field":     "",
+                            "type":      var.type_detail,
+                            "condition": "",
                             **_idx_cells(None),
-                            "value": _serialize_value(var.value),
+                            "value":     _serialize_value(var.value),
                         })
                 else:
                     for fld in var.fields:

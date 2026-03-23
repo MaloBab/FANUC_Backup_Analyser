@@ -28,8 +28,8 @@ Particularités
 - Valeur ``*Uninitialized*`` → normalisée en ``"Uninitialized"`` (cohérence .VA).
 - Type ``POSITION`` → valeur inline ``Group:1/Axes:0/.../X:.../Y:...`` parsée
   en ``PositionValue`` (``raw_lines`` = liste des segments ``Clé:Valeur``).
-- ``ConditionHandler`` → stocké dans ``RobotVarField.type_detail`` pour ne pas
-  perdre l'information (pas de champ dédié dans le modèle actuel).
+- ``ConditionHandler`` → stocké dans ``RobotVarField.condition_handler``
+  (champ dédié, optionnel, vide pour les fichiers .VA).
 - Pas de champ ``Storage`` dans DATAID.CSV → ``StorageType.UNKNOWN``.
 - ``CW`` (Condition Write) mappé sur ``AccessType.RO`` avec log (valeur inconnue
   des enums existants → traitement conservateur).
@@ -102,10 +102,6 @@ _EXPECTED_COLUMNS = {
 # ---------------------------------------------------------------------------
 
 def _normalize_value(raw: str) -> str:
-    """Normalise la valeur brute extraite du CSV.
-
-    ``*Uninitialized*`` → ``"Uninitialized"`` pour cohérence avec le parser .VA.
-    """
     stripped = raw.strip()
     return _UNINITIALIZED_NORM if stripped == _UNINITIALIZED_CSV else stripped
 
@@ -135,17 +131,11 @@ def _parse_index(raw: str | None) -> tuple[int, ...] | None:
 
 
 def _parse_position_value(raw: str) -> PositionValue:
-    """Parse une valeur POSITION inline DATAID.CSV.
-
-    Format : ``Group:1/Axes:0/Tool:255/Frame:255/Config:.../X:.../Y:...``
-    Chaque segment ``Clé:Valeur`` devient une entrée de ``raw_lines``.
-    """
     segments = [seg.strip() for seg in raw.split("/") if seg.strip()]
     return PositionValue(raw_lines=segments, label="")
 
 
 def _detect_encoding(path: Path) -> str:
-    """Détecte l'encodage du fichier CSV (BOM UTF-8 en priorité)."""
     try:
         header = path.read_bytes()[:3]
         if header == b"\xef\xbb\xbf":
@@ -153,6 +143,23 @@ def _detect_encoding(path: Path) -> str:
     except OSError:
         pass
     return "utf-8"
+
+
+def _build_field_value(
+    raw_value: str,
+    data_type: VADataType,
+) -> object:
+    """Construit la valeur brute du field.
+
+    Retourne toujours une valeur simple (str ou PositionValue).
+    La fusion des entrées indexées en ArrayValue est déléguée à _build_variables.
+    """
+    normalized = _normalize_value(raw_value)
+
+    if data_type == VADataType.POSITION and normalized != _UNINITIALIZED_NORM:
+        return _parse_position_value(raw_value)
+
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +183,6 @@ def _read_csv_rows(path: Path) -> tuple[str, list[dict[str, str]]]:
     if not lines:
         raise ValueError("Fichier vide.")
 
-    # --- Ligne 0 : version ---
     version = "unknown"
     first_fields = next(csv.reader([lines[0]]))
     if first_fields and first_fields[0].strip() == _DATAID_VERSION_KEY:
@@ -187,7 +193,6 @@ def _read_csv_rows(path: Path) -> tuple[str, list[dict[str, str]]]:
             f"Attendu : '{_DATAID_VERSION_KEY},…'"
         )
 
-    # --- Ligne 1 : en-têtes (ligne REM) ---
     if len(lines) < 2:
         raise ValueError("Fichier trop court — en-têtes manquants.")
 
@@ -201,7 +206,6 @@ def _read_csv_rows(path: Path) -> tuple[str, list[dict[str, str]]]:
     if missing:
         raise ValueError(f"Colonnes manquantes dans l'en-tête : {missing}")
 
-    # --- Lignes de données ---
     data_rows: list[dict[str, str]] = []
     reader = csv.DictReader(
         lines[2:],
@@ -215,7 +219,6 @@ def _read_csv_rows(path: Path) -> tuple[str, list[dict[str, str]]]:
             data_rows.append(dict(row))
         elif row_type == _ROW_TYPE_END:
             break
-        # Autres types (lignes vides, commentaires) : ignorées silencieusement
 
     return version, data_rows
 
@@ -232,22 +235,22 @@ def _build_variables(
 
     Chaque ligne DATAID correspond à un ``RobotVarField`` rattaché à une
     ``RobotVariable`` parente synthétique (une par ``$PARENT`` unique).
+    Les entrées indexées du même field name sont fusionnées dans une seule
+    ``ArrayValue`` portée par un field-agrégat sans index propre.
     Les variables sont retournées dans l'ordre de première apparition du parent.
 
     :returns: tuple ``(variables, errors)``
     """
-    # Index des variables parentes par nom de parent
-    parent_map: dict[str, RobotVariable] = {}
-    # Ordre d'insertion pour la stabilité
-    parent_order: list[str] = []
-    errors: list[str] = []
+    parent_map:   dict[str, RobotVariable] = {}
+    parent_order: list[str]                = []
+    errors:       list[str]                = []
 
     for row in rows:
-        raw_name        = row.get("DataID Name", "").strip()
-        raw_type        = row.get("Data Type", "").strip()
-        raw_value       = row.get("Value", "").strip()
-        raw_access      = row.get("Access Type", "").strip()
-        raw_condition   = row.get("ConditionHandler", "").strip()
+        raw_name      = row.get("DataID Name", "").strip()
+        raw_type      = row.get("Data Type", "").strip()
+        raw_value     = row.get("Value", "").strip()
+        raw_access    = row.get("Access Type", "").strip()
+        raw_condition = row.get("ConditionHandler", "").strip()
 
         m = _RE_DATAID_NAME.match(raw_name)
         if not m:
@@ -255,16 +258,15 @@ def _build_variables(
             logger.warning("Nom DATAID non reconnu : %r", raw_name)
             continue
 
-        parent_name = m.group(1)   # ex: "$ALARM"
-        field_name  = m.group(2)   # ex: "ERROR_SEVERITY_TABLE"
-        index_raw   = m.group(3)   # ex: "1" ou "1,2" ou None
+        parent_name = m.group(1)
+        field_name  = m.group(2)
+        index_raw   = m.group(3)
 
-        data_type   = _parse_datatype(raw_type)
-        access      = _parse_access(raw_access)
-        index_nd    = _parse_index(index_raw)
-        value       = _build_field_value(raw_value, data_type, index_nd)
+        data_type = _parse_datatype(raw_type)
+        access    = _parse_access(raw_access)
+        index_nd  = _parse_index(index_raw)
+        value     = _build_field_value(raw_value, data_type)
 
-        # Récupère ou crée la variable parente synthétique
         if parent_name not in parent_map:
             parent_var = _make_parent_variable(parent_name, source_file)
             parent_map[parent_name] = parent_var
@@ -272,33 +274,50 @@ def _build_variables(
         else:
             parent_var = parent_map[parent_name]
 
-        # Construit le field et l'attache à la variable parente
-        field = RobotVarField(
-            full_name       = raw_name,
-            parent_var      = parent_name,
-            field_name      = field_name,
-            access          = access,
-            data_type       = data_type,
-            # type_detail stocke aussi ConditionHandler pour ne pas perdre l'info
-            type_detail     = f"{raw_type} [{raw_condition}]" if raw_condition else raw_type,
-            value           = value,
-            parent_index_nd = index_nd,
-        )
-        parent_var.fields.append(field)
-
-        # Met à jour is_array si on voit au moins un index
         if index_nd is not None:
             parent_var.is_array = True
+            existing = next(
+                (f for f in parent_var.fields
+                 if f.field_name == field_name and f.parent_index_nd is None),
+                None,
+            )
+            if existing is not None and isinstance(existing.value, ArrayValue):
+                existing.value.items[index_nd] = value  # type: ignore[index]
+            else:
+                arr = ArrayValue()
+                arr.items[index_nd] = value  # type: ignore[index]
+                parent_var.fields.append(RobotVarField(
+                    full_name         = f"{parent_name}.{field_name}",
+                    parent_var        = parent_name,
+                    field_name        = field_name,
+                    access            = access,
+                    data_type         = data_type,
+                    type_detail       = raw_type,
+                    value             = arr,
+                    parent_index_nd   = None,
+                    condition_handler = raw_condition,
+                ))
+        else:
+            parent_var.fields.append(RobotVarField(
+                full_name         = raw_name,
+                parent_var        = parent_name,
+                field_name        = field_name,
+                access            = access,
+                data_type         = data_type,
+                type_detail       = raw_type,
+                value             = value,
+                parent_index_nd   = None,
+                condition_handler = raw_condition,
+            ))
 
     variables = [parent_map[k] for k in parent_order]
     return variables, errors
 
 
 def _make_parent_variable(parent_name: str, source_file: Path) -> RobotVariable:
-    """Crée une variable parente synthétique pour un ``$PARENT`` DATAID."""
     return RobotVariable(
         name        = parent_name,
-        namespace   = "*SYSTEM*",   # toutes les vars DATAID sont système
+        namespace   = "*SYSTEM*",
         storage     = StorageType.UNKNOWN,
         access      = AccessType.UNKNOWN,
         data_type   = VADataType.STRUCT,
@@ -311,31 +330,6 @@ def _make_parent_variable(parent_name: str, source_file: Path) -> RobotVariable:
         source_file = source_file,
         line_number = None,
     )
-
-
-def _build_field_value(
-    raw_value: str,
-    data_type: VADataType,
-    index_nd: tuple[int, ...] | None,
-) -> object:
-    """Construit la valeur du field selon son type et son index.
-
-    - ``POSITION``              → ``PositionValue``
-    - Toute valeur avec index   → intégrée dans ``ArrayValue``
-    - Autres                    → scalaire ``str``
-    """
-    normalized = _normalize_value(raw_value)
-
-    if data_type == VADataType.POSITION and normalized != _UNINITIALIZED_NORM:
-        pos_value = _parse_position_value(raw_value)
-        if index_nd is not None:
-            arr = ArrayValue()
-            arr.items[index_nd] = pos_value
-            return arr
-        return pos_value
-
-    # Scalaire (avec ou sans index)
-    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +351,6 @@ class DataIdCsvParser(BackupParser):
     FORMAT_ID = "dataid_csv"
 
     def can_parse(self, path: Path) -> bool:
-        """Retourne ``True`` si le dossier contient un fichier ``DATAID.CSV``."""
         return any(
             f.name.upper() == _DATAID_FILENAME.upper()
             for f in path.iterdir()
@@ -413,13 +406,8 @@ class DataIdCsvParser(BackupParser):
         )
         return variables
 
-    # ------------------------------------------------------------------
-    # Helpers internes
-    # ------------------------------------------------------------------
-
     @staticmethod
     def _find_dataid_file(path: Path) -> Path | None:
-        """Localise ``DATAID.CSV`` de façon insensible à la casse."""
         try:
             return next(
                 f for f in path.iterdir()

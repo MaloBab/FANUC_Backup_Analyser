@@ -19,6 +19,11 @@ from ui.components.main_panel.results_tree import ResultsTree
 from ui.components.filters_bar import FiltersBar
 
 
+def _has_conditions(fields: list[RobotVarField]) -> bool:
+    """Retourne True si au moins un field porte un condition_handler non vide."""
+    return any(bool(f.condition_handler) for f in fields)
+
+
 class PageRenderer:
     """Effectue le rendu d'une page dans le ResultsTree."""
 
@@ -107,13 +112,6 @@ class PageRenderer:
         self._filters.set_count(f"{len(vars_)} variable(s)")
 
     def render_variable(self, var: RobotVariable) -> None:
-        self._tree.configure_columns([
-            ("col1", "Index",   90, "center", False),
-            ("col2", "Field",  220, "w",      False),
-            ("col3", "Access",  65, "center", False),
-            ("col4", "Type",   170, "w",      False),
-            ("col5", "Valeur", 260, "w",      True),
-        ])
         query = self._filters.query
         self._tree.clear()
 
@@ -123,13 +121,17 @@ class PageRenderer:
                 items = [f for f in items
                          if query in f.field_name.lower()
                          or query in f.type_detail.lower()]
+            show_condition = _has_conditions(items)
+            self._configure_field_columns(show_condition)
             for i, fld in enumerate(items):
-                self._insert_field_row(i, fld, var.fields)
+                self._insert_field_row(i, fld, var.fields, show_condition)
             self._filters.set_count(f"{len(items)} field(s)")
 
         elif isinstance(var.value, ArrayValue):
+            self._configure_field_columns(show_condition=False)
             self.render_array_items(var.value)
         elif isinstance(var.value, PositionValue):
+            self._configure_field_columns(show_condition=False)
             self.render_position_lines(var.value)
 
     def render_subfields(
@@ -137,13 +139,6 @@ class PageRenderer:
         fields: list[RobotVarField],
         source_all: list[RobotVarField] | None = None,
     ) -> None:
-        self._tree.configure_columns([
-            ("col1", "Index",   90, "center", False),
-            ("col2", "Field",  220, "w",      False),
-            ("col3", "Access",  65, "center", False),
-            ("col4", "Type",   170, "w",      False),
-            ("col5", "Valeur", 260, "w",      True),
-        ])
         query = self._filters.query
         items = fields
         if query:
@@ -151,9 +146,11 @@ class PageRenderer:
                      if query in f.field_name.lower()
                      or query in f.type_detail.lower()]
         all_fields = source_all if source_all is not None else fields
+        show_condition = _has_conditions(items)
+        self._configure_field_columns(show_condition)
         self._tree.clear()
         for i, fld in enumerate(items):
-            self._insert_field_row(i, fld, all_fields)
+            self._insert_field_row(i, fld, all_fields, show_condition)
         self._filters.set_count(f"{len(items)} field(s)")
 
     def render_array(self, arr: ArrayValue) -> None:
@@ -246,6 +243,29 @@ class PageRenderer:
         self._filters.set_count(f"{len(pos.raw_lines)} ligne(s)")
 
     # ------------------------------------------------------------------
+    # Configuration des colonnes pour les pages de fields
+    # ------------------------------------------------------------------
+
+    def _configure_field_columns(self, show_condition: bool) -> None:
+        if show_condition:
+            self._tree.configure_columns([
+                ("col1", "Index",      90, "center", False),
+                ("col2", "Field",     200, "w",      False),
+                ("col3", "Access",     65, "center", False),
+                ("col4", "Type",      130, "w",      False),
+                ("col5", "Condition", 120, "w",      False),
+                ("col6", "Valeur",    200, "w",      True),
+            ])
+        else:
+            self._tree.configure_columns([
+                ("col1", "Index",   90, "center", False),
+                ("col2", "Field",  220, "w",      False),
+                ("col3", "Access",  65, "center", False),
+                ("col4", "Type",   170, "w",      False),
+                ("col5", "Valeur", 260, "w",      True),
+            ])
+
+    # ------------------------------------------------------------------
     # Insertion d'une ligne field
     # ------------------------------------------------------------------
 
@@ -254,6 +274,7 @@ class PageRenderer:
         row_index: int,
         fld: RobotVarField,
         all_fields: list[RobotVarField] | None = None,
+        show_condition: bool = False,
     ) -> None:
         tags: list[str] = ["even" if row_index % 2 == 0 else "odd"]
         val = field_value_preview(fld, all_fields)
@@ -271,9 +292,17 @@ class PageRenderer:
         )
         type_disp = inner_type(fld.type_detail) if is_scalar_child else fld.type_detail
 
-        self._tree.insert(
-            values=(index_str(fld.parent_index_nd),
-                    fld.field_name, fld.access.value,
-                    type_disp[:50], val),
-            iid=str(id(fld)), tags=tuple(tags),
-        )
+        if show_condition:
+            self._tree.insert(
+                values=(index_str(fld.parent_index_nd),
+                        fld.field_name, fld.access.value,
+                        type_disp[:50], fld.condition_handler, val),
+                iid=str(id(fld)), tags=tuple(tags),
+            )
+        else:
+            self._tree.insert(
+                values=(index_str(fld.parent_index_nd),
+                        fld.field_name, fld.access.value,
+                        type_disp[:50], val),
+                iid=str(id(fld)), tags=tuple(tags),
+            )
