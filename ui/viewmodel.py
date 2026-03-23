@@ -247,8 +247,8 @@ class AppViewModel:
         self.workspace = workspace
         self.is_busy   = False
         n = workspace.robot_count
-        self._emit_status(f"Workspace scanné — {n} backup(s) trouvé(s)")
-        self._emit_log(f"Workspace : {n} robot(s) dans {workspace.root_path.name}", "info")
+        self._emit_status(f"Workspace analysed — {n} backup(s) founded")
+        self._emit_log(f"Workspace : {n} robot(s) in {workspace.root_path.name}", "info")
         if self.on_workspace_ready:
             self.on_workspace_ready(workspace)
         if workspace.backups:
@@ -258,7 +258,7 @@ class AppViewModel:
         pending = [b for b in workspace.backups if not b.loaded]
         if not pending:
             total = sum(b.var_count for b in workspace.backups)
-            self._emit_status(f"Workspace chargé — {total} variable(s) au total")
+            self._emit_status(f"Workspace loaded — {total} variable(s)")
             return
         backup = pending[0]
         if self._worker.is_running:
@@ -266,7 +266,7 @@ class AppViewModel:
                 self._tk_root.after(200, lambda: self._load_all_backups(workspace))
             return
         self.is_busy = True
-        self._emit_status(f"Chargement {backup.name}… ({len(pending)} restant(s))")
+        self._emit_status(f"Loading {backup.name}… ({len(pending)} remaining")
 
         def _on_done(b: RobotBackup) -> None:
             self.is_busy = False

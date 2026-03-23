@@ -68,12 +68,12 @@ class PageRenderer:
             return
 
         self._tree.configure_columns([
-            ("col1", "NS",       70, "center", False),
-            ("col2", "Nom",     210, "w",      False),
+            ("col1", "NameSpace",       70, "center", False),
+            ("col2", "Name",     210, "w",      False),
             ("col3", "Storage",  70, "center", False),
-            ("col4", "Type",    180, "w",      True),
-            ("col5", "Valeur",  140, "w",      False),
-            ("col6", "Fichier", 130, "w",      False),
+            ("col4", "Type",    170, "w",      True),
+            ("col5", "Value",  150, "w",      False),
+            ("col6", "File", 130, "w",      False),
         ])
         query = self._filters.query
         scope = self._filters.scope
@@ -179,15 +179,15 @@ class PageRenderer:
     def render_search_results(self, results: SearchResults) -> None:
         """Page de résultats de recherche globale.
 
-        Colonnes : Backup | Fichier | Variable | Chemin | Valeur
+        Colonnes : Backup | File | Variable | Path | Value
         Chaque ligne est taguée ``nav`` : double-clic navigue vers la variable.
         """
         self._tree.configure_columns([
             ("col1", "Backup",   140, "w",      False),
-            ("col2", "Fichier",  110, "w",      False),
+            ("col2", "File",  110, "w",      False),
             ("col3", "Variable", 160, "w",      False),
-            ("col4", "Chemin",   210, "w",      True),
-            ("col5", "Valeur",   150, "w",      False),
+            ("col4", "Path",   210, "w",      True),
+            ("col5", "Value",   150, "w",      False),
         ])
         self._tree.clear()
 

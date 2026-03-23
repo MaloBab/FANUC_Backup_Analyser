@@ -1,12 +1,22 @@
 """
 Orchestrateur — Façade entre l'UI et les services métier.
 Coordonne le parsing (et à terme la conversion) sans que l'UI ne connaisse les détails.
-Pattern : Facade + Observer (via callbacks de progression).
+Pattern : Facade + Observer (via callbacks de progression) + Strategy (parsers).
 
-Corrections appliquées
-──────────────────────
-- ``_run_with_conversion`` : ajout du ``logger.error`` manquant sur les erreurs
-  de parsing (asymétrie avec ``_run_direct`` corrigée).
+Sélection automatique du parser
+────────────────────────────────
+``_select_parser()`` parcourt la liste ``_parsers`` dans l'ordre de priorité et
+retourne le premier dont ``can_parse()`` retourne ``True``.  Pour ajouter un
+nouveau format, il suffit d'instancier le parser correspondant dans ``__init__``
+— aucune autre modification n'est nécessaire.
+
+Ordre de priorité actuel :
+  1. ``DataIdCsvParser``  — robots nouvelle génération (DATAID.CSV)
+  2. ``VAParser``         — robots classiques (fichiers .VA)
+
+``DataIdCsvParser`` est testé en premier pour éviter qu'un dossier contenant
+à la fois un DATAID.CSV et des fichiers .VA soit mal classifié (le DATAID.CSV
+est le format faisant autorité sur les robots récents).
 
 Note sur le ``progress_cb``
 ───────────────────────────
@@ -28,30 +38,40 @@ from typing import Callable
 
 from config.settings import Settings
 from models.fanuc_models import (
-    ExtractionResult, ConversionResult, ConversionStatus,
+    ConversionResult, ConversionStatus,
+    ExtractionResult,
     RobotBackup, WorkspaceResult,
 )
-from services.parser import VAParser
+from services.parser.base_parser import BackupParser, ProgressCallback
+from services.parser.va_parser import VAParser
+from services.parser.dataid_csv_parser import DataIdCsvParser
 from services.exporter import VariableExporter
 
 logger = logging.getLogger(__name__)
-
-ProgressCallback = Callable[[int, int, str], None]
 
 
 class ExtractionOrchestrator:
     """Point d'entrée unique pour l'UI.
 
-    En V1 (``skip_conversion=True``), scanne directement les ``.VA`` du dossier
-    source sans passer par Roboguide.  Quand la CLI Roboguide sera connue,
-    il suffira de passer ``skip_conversion=False`` et de compléter
-    ``_build_roboguide_command()``.
+    Sélectionne automatiquement le parser adapté à chaque backup via la liste
+    ``_parsers``.  Pour ajouter un nouveau format, instancier le parser dans
+    ``__init__`` et l'insérer dans ``_parsers`` à la position souhaitée.
     """
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._parser   = VAParser()
         self._exporter = VariableExporter()
+
+        # Ordre de priorité : DataIdCsvParser avant VAParser.
+        # Le premier parser dont can_parse() retourne True est utilisé.
+        self._parsers: list[BackupParser] = [
+            DataIdCsvParser(),
+            VAParser(),
+        ]
+
+    # ------------------------------------------------------------------
+    # Interface publique
+    # ------------------------------------------------------------------
 
     def run(
         self,
@@ -60,12 +80,14 @@ class ExtractionOrchestrator:
         progress_cb: ProgressCallback | None = None,
         skip_conversion: bool = True,
     ) -> ExtractionResult:
-        """Lance le pipeline d'extraction.
+        """Lance le pipeline d'extraction sur un dossier.
 
-        :param input_dir: dossier à analyser.
-        :param output_dir: dossier de sortie optionnel (ignoré en V1).
-        :param progress_cb: callback ``(current, total, message)`` pour la progression.
-        :param skip_conversion: si ``True``, parse directement les ``.VA`` sans Roboguide.
+        Sélectionne automatiquement le parser via ``_select_parser()``.
+
+        :param input_dir:       dossier à analyser.
+        :param output_dir:      dossier de sortie optionnel (ignoré en V1).
+        :param progress_cb:     callback ``(current, total, message)`` pour la progression.
+        :param skip_conversion: si ``True``, parse directement sans Roboguide.
         :returns: ``ExtractionResult`` avec toutes les variables et les erreurs éventuelles.
         """
         if skip_conversion:
@@ -75,14 +97,18 @@ class ExtractionOrchestrator:
     def export(self, result: ExtractionResult, output_path: Path, fmt: str = "csv") -> None:
         """Exporte un résultat d'extraction vers un fichier.
 
-        :param result: résultat à exporter.
+        :param result:      résultat à exporter.
         :param output_path: chemin de destination.
-        :param fmt: ``"csv"``, ``"csv_flat"`` ou ``"json"``.
+        :param fmt:         ``"csv"``, ``"csv_flat"`` ou ``"json"``.
         """
         self._exporter.export(result.variables, output_path, fmt)
 
     def scan_workspace(self, root_path: Path) -> WorkspaceResult:
-        """Scanne un dossier racine et détecte les sous-dossiers contenant des .VA.
+        """Scanne un dossier racine et détecte les sous-dossiers backups.
+
+        Supporte les formats mixtes : un workspace peut contenir à la fois
+        des backups .VA (anciens robots) et des backups DATAID.CSV (nouveaux).
+        Chaque sous-dossier est annoté avec le ``format`` détecté.
 
         Ne parse pas les fichiers immédiatement — retourne uniquement la structure
         pour permettre à l'UI d'afficher la liste des robots avant le chargement.
@@ -92,23 +118,30 @@ class ExtractionOrchestrator:
         """
         result = WorkspaceResult(root_path=root_path)
 
-        # Chercher les sous-dossiers directs qui contiennent au moins un .VA
+        # Chercher les sous-dossiers directs reconnus par au moins un parser
         candidates = sorted(
             p for p in root_path.iterdir()
-            if p.is_dir() and any(p.rglob("*.[Vv][Aa]"))
+            if p.is_dir() and self._select_parser(p) is not None
         )
 
-        # Cas dégénéré : le dossier racine lui-même contient des .VA (backup simple)
-        if not candidates and any(root_path.glob("*.[Vv][Aa]")):
-            result.backups.append(RobotBackup(name=root_path.name, path=root_path))
+        # Cas dégénéré : le dossier racine lui-même est un backup
+        if not candidates and self._select_parser(root_path) is not None:
+            fmt = self._detect_format(root_path)
+            result.backups.append(
+                RobotBackup(name=root_path.name, path=root_path, format=fmt)
+            )
         else:
             for sub in candidates:
-                result.backups.append(RobotBackup(name=sub.name, path=sub))
+                fmt = self._detect_format(sub)
+                result.backups.append(RobotBackup(name=sub.name, path=sub, format=fmt))
 
         logger.info(
-            "Workspace scanné : %d robot(s) trouvé(s) dans %s",
+            "Workspace scanné : %d backup(s) trouvé(s) dans %s",
             len(result.backups), root_path,
         )
+        for backup in result.backups:
+            logger.debug("  %s — format : %s", backup.name, backup.format)
+
         return result
 
     def load_backup(
@@ -116,8 +149,9 @@ class ExtractionOrchestrator:
         backup: RobotBackup,
         progress_cb: ProgressCallback | None = None,
     ) -> RobotBackup:
-        """Parse tous les .VA d'un backup robot et peuple ``backup.variables``.
+        """Parse un backup robot et peuple ``backup.variables``.
 
+        Sélectionne automatiquement le parser via ``_select_parser()``.
         Modifie ``backup`` en place et retourne-le pour faciliter
         l'utilisation avec ``BackgroundWorker``.
 
@@ -125,14 +159,63 @@ class ExtractionOrchestrator:
         :param progress_cb: callback ``(current, total, message)`` optionnel.
         :returns: le même objet ``backup`` mis à jour.
         """
-        result = self._run_direct(backup.path, progress_cb)
-        backup.variables = result.variables
-        backup.errors    = result.errors
+        parser = self._select_parser(backup.path)
+
+        if parser is None:
+            msg = f"Aucun parser compatible pour '{backup.name}' ({backup.path})"
+            logger.error(msg)
+            backup.errors.append(msg)
+            backup.loaded = True
+            return backup
+
+        try:
+            variables = parser.parse(backup.path, progress_cb)
+        except Exception as exc:
+            msg = f"Erreur inattendue lors du parsing de '{backup.name}' : {exc}"
+            logger.exception(msg)
+            backup.errors.append(msg)
+            backup.loaded = True
+            return backup
+
+        backup.variables = variables
         backup.loaded    = True
+        _notify(
+            progress_cb,
+            1, 1,
+            f"Terminé — {backup.var_count} variable(s), {backup.field_count} field(s)",
+        )
         return backup
 
     # ------------------------------------------------------------------
-    # Pipelines
+    # Sélection du parser (Strategy)
+    # ------------------------------------------------------------------
+
+    def _select_parser(self, path: Path) -> BackupParser | None:
+        """Retourne le premier parser compatible avec *path*, ou ``None``.
+
+        Parcourt ``_parsers`` dans l'ordre de priorité.  Le premier dont
+        ``can_parse()`` retourne ``True`` est sélectionné.
+
+        :param path: dossier racine d'un backup robot.
+        """
+        for parser in self._parsers:
+            try:
+                if parser.can_parse(path):
+                    return parser
+            except OSError as exc:
+                logger.warning(
+                    "can_parse() a levé une OSError pour %s (%s) : %s",
+                    parser.__class__.__name__, path, exc,
+                )
+        return None
+
+    def _detect_format(self, path: Path) -> str:
+        """Retourne le ``FORMAT_ID`` du parser compatible, ou ``"unknown"``."""
+        parser = self._select_parser(path)
+        return parser.FORMAT_ID if parser is not None else "unknown"
+
+    # ------------------------------------------------------------------
+    # Pipeline direct (sans Roboguide)
     # ------------------------------------------------------------------
 
     def _run_direct(
@@ -140,28 +223,31 @@ class ExtractionOrchestrator:
         input_dir: Path,
         progress_cb: ProgressCallback | None,
     ) -> ExtractionResult:
-        """Parse directement tous les fichiers .VA du dossier (V1 — sans Roboguide)."""
-        va_files = sorted(p for p in input_dir.rglob("*") if p.suffix.lower() == ".va")
-        total    = len(va_files)
+        """Parse directement le dossier en sélectionnant le bon parser."""
+        parser = self._select_parser(input_dir)
 
-        if total == 0:
-            _notify(progress_cb, 0, 0, "No .VA files found.")
+        if parser is None:
+            _notify(progress_cb, 0, 0, "Aucun fichier reconnu dans ce dossier.")
+            logger.warning("Aucun parser compatible pour : %s", input_dir)
             return ExtractionResult(input_dir=input_dir)
 
         result = ExtractionResult(input_dir=input_dir)
-        for i, va_path in enumerate(va_files, start=1):
-            _notify(progress_cb, i, total, f"Parsing : {va_path.name}")
-            try:
-                result.variables.extend(self._parser.parse_file(va_path))
-            except Exception as exc:
-                result.errors.append(f"{va_path.name}: {exc}")
-                logger.error("Parsing Error %s : %s", va_path.name, exc)
+        try:
+            result.variables.extend(parser.parse(input_dir, progress_cb))
+        except Exception as exc:
+            result.errors.append(str(exc))
+            logger.error("Erreur parsing %s : %s", input_dir, exc)
 
         _notify(
-            progress_cb, total, total,
-            f"Finished — {result.var_count} variable(s), {result.field_count} field(s)",
+            progress_cb,
+            1, 1,
+            f"Terminé — {result.var_count} variable(s), {result.field_count} field(s)",
         )
         return result
+
+    # ------------------------------------------------------------------
+    # Pipeline avec conversion Roboguide (V2 — TODO)
+    # ------------------------------------------------------------------
 
     def _run_with_conversion(
         self,
@@ -173,9 +259,11 @@ class ExtractionOrchestrator:
         result = ExtractionResult(input_dir=input_dir)
 
         with _ensure_output_dir(output_dir) as work_dir:
-            _notify(progress_cb, 0, 1, "Conversion in progress…")
+            _notify(progress_cb, 0, 1, "Conversion en cours…")
             conversion_results = self._convert_directory(input_dir, work_dir, progress_cb)
 
+            # Après conversion, les fichiers produits sont des .VA → VAParser
+            va_parser = VAParser()
             successful = [
                 r.output_path for r in conversion_results
                 if r.status == ConversionStatus.SUCCESS and r.output_path
@@ -184,26 +272,25 @@ class ExtractionOrchestrator:
             for i, va_path in enumerate(successful, start=1):
                 _notify(progress_cb, i, total, f"Parsing : {va_path.name}")
                 try:
-                    result.variables.extend(self._parser.parse_file(va_path))
+                    result.variables.extend(va_parser.parse_file(va_path))
                 except Exception as exc:
-                    # ← logger.error ajouté (asymétrie corrigée par rapport à _run_direct)
                     result.errors.append(f"{va_path.name}: {exc}")
-                    logger.error("Parsing Error %s : %s", va_path.name, exc)
+                    logger.error("Erreur parsing %s : %s", va_path.name, exc)
 
         for r in conversion_results:
             if r.status == ConversionStatus.FAILED:
                 result.errors.append(
-                    f"Conversion failed : {r.source_path.name} — {r.error_message}"
+                    f"Conversion échouée : {r.source_path.name} — {r.error_message}"
                 )
 
         _notify(
             progress_cb, 1, 1,
-            f"Finished — {result.var_count} variable(s), {result.field_count} field(s)",
+            f"Terminé — {result.var_count} variable(s), {result.field_count} field(s)",
         )
         return result
 
     # ------------------------------------------------------------------
-    # Conversion (V2 — TODO)
+    # Conversion Roboguide (V2 — TODO)
     # ------------------------------------------------------------------
 
     def _convert_directory(
@@ -214,7 +301,7 @@ class ExtractionOrchestrator:
     ) -> list[ConversionResult]:
         """Lance Roboguide sur chaque fichier source trouvé."""
         files   = self._find_convertible_files(input_dir)
-        results : list[ConversionResult] = []
+        results: list[ConversionResult] = []
         for i, src in enumerate(files, start=1):
             _notify(progress_cb, i, len(files), f"Conversion : {src.name}")
             results.append(self._convert_one(src, output_dir))
@@ -257,11 +344,13 @@ class ExtractionOrchestrator:
     def _find_convertible_files(directory: Path) -> list[Path]:
         """TODO : ajuster les extensions sources selon le format Roboguide."""
         extensions = {".vs", ".tp", ".vr"}
-        return sorted(p for p in directory.rglob("*") if p.suffix.lower() in extensions)
+        return sorted(
+            p for p in directory.rglob("*") if p.suffix.lower() in extensions
+        )
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers module-level
 # ---------------------------------------------------------------------------
 
 def _notify(cb: ProgressCallback | None, cur: int, tot: int, msg: str) -> None:

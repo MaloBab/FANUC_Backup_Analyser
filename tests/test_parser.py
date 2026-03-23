@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from pathlib import Path
 
-from services.parser import VAParser
+from services.parser.va_parser import VAParser
 from models.fanuc_models import (
     RobotVariable,
     StorageType, AccessType, VADataType,

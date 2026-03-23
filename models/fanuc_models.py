@@ -203,7 +203,8 @@ class RobotBackup:
     """Représente un backup robot : un sous-dossier contenant des fichiers .VA."""
     name:      str
     path:      Path
-    variables: list[RobotVariable] = field(default_factory=list)
+    format:    str                  = "unknown"
+    variables: list[RobotVariable]  = field(default_factory=list)
     errors:    list[str]            = field(default_factory=list)
     loaded:    bool                 = False
 

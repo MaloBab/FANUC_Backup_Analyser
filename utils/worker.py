@@ -3,24 +3,6 @@ Worker thread générique pour exécuter des tâches longues
 sans bloquer la boucle Tkinter.
 Pattern : Command + Observer
 
-Corrections appliquées
-──────────────────────
-1. Race condition callbacks : ``_on_done``/``_on_error`` sont assignés AVANT
-   ``thread.start()`` pour éviter qu'un thread instantané enfile son résultat
-   avant que les callbacks ne soient enregistrés.
-
-2. Thread-safety du ``progress_cb`` : les notifications de progression transitent
-   par la même queue FIFO que ``done``/``error``. ``on_progress`` est toujours
-   invoqué depuis le thread Tkinter via ``poll_result()``.
-
-3. ``poll_result`` gère les trois types de messages (``done``, ``error``,
-   ``progress``) et ne termine le polling que sur ``done``/``error``.
-
-4. Purge de la queue au début de ``run()`` : élimine tout résidu d'un run
-   précédent (typiquement un ``done`` arrivé entre la fin du thread et le
-   prochain appel à ``run()``). Sans cette purge, le ``_on_done`` du nouveau
-   run consomme le payload de l'ancien run, produisant des erreurs de type
-   (ex: ``RobotBackup`` reçu à la place d'un ``WorkspaceResult``).
 """
 
 from __future__ import annotations
