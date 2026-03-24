@@ -34,7 +34,7 @@ from services.parser.va_parser import (
     _split_field_name,
 )
 
-from test_config import (
+from tests.conftest import (
     VA_ARRAY_OF_POSITION,
     VA_ARRAY_OF_STRUCT,
     VA_ARRAYS,

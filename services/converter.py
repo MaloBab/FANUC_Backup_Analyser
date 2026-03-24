@@ -58,31 +58,16 @@ class KconvarsNotFoundError(ConverterError):
 def _find_kconvars(settings: Settings) -> Path:
     """Retourne le chemin vers kconvars.exe.
 
-    Priorité :
-    1. ``settings.kconvars_exe`` si renseigné et existant
-    2. Chemins d'installation Roboguide connus
-    3. PATH système (shutil.which)
-
     Raises:
         KconvarsNotFoundError: si aucun chemin ne donne un exécutable valide.
     """
-    candidates: list[Path] = []
 
     if settings.kconvars_exe:
-        candidates.append(Path(settings.kconvars_exe))
+        path =Path(settings.kconvars_exe)
 
-    candidates.extend(_KCONVARS_CANDIDATES)
-
-    for path in candidates:
         if path.is_file():
             logger.debug("kconvars trouvé : %s", path)
             return path
-
-    # Dernière chance : PATH système
-    found = shutil.which("kconvars")
-    if found:
-        logger.debug("kconvars trouvé dans PATH : %s", found)
-        return Path(found)
 
     raise KconvarsNotFoundError(
         "kconvars.exe introuvable. Renseignez son chemin dans les paramètres "

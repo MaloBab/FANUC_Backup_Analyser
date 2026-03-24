@@ -188,26 +188,14 @@ class TestFindKconvars:
         exe = tmp_path / "kconvars.exe"
         exe.write_bytes(b"")
         s = Settings()
-        s.roboguide_exe = str(exe)
+        s.kconvars_exe = str(exe)
         result = _find_kconvars(s)
         assert result == exe
-
-    def test_settings_exe_inexistant_cherche_ailleurs(
-        self, tmp_path: Path, mocker
-    ) -> None:
-        s = Settings()
-        s.roboguide_exe = str(tmp_path / "inexistant.exe")
-        # Simule kconvars dans le PATH
-        fake_exe = tmp_path / "kconvars.exe"
-        fake_exe.write_bytes(b"")
-        mocker.patch("shutil.which", return_value=str(fake_exe))
-        result = _find_kconvars(s)
-        assert result == fake_exe
 
     def test_leve_erreur_si_introuvable(self, mocker) -> None:
         mocker.patch("shutil.which", return_value=None)
         s = Settings()
-        s.roboguide_exe = ""
+        s.kconvars_exe = ""  # FIX: kconvars_exe
         # Patch tous les candidats connus pour qu'ils n'existent pas
         mocker.patch("services.converter._KCONVARS_CANDIDATES", [])
         with pytest.raises(KconvarsNotFoundError):

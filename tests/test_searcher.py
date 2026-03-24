@@ -36,7 +36,7 @@ from services.searcher import (
     _parse_index,
 )
 
-from test_config import make_backup, make_field, make_var
+from tests.conftest import make_backup, make_field, make_var
 
 
 # ===========================================================================

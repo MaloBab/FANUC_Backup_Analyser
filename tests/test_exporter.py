@@ -31,7 +31,7 @@ from models.fanuc_models import (
 )
 from services.exporter import ExportError, VariableExporter
 
-from test_config import make_field, make_var
+from tests.conftest import make_field, make_var
 
 
 # ===========================================================================

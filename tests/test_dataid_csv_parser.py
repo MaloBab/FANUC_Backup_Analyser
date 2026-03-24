@@ -37,7 +37,7 @@ from services.parser.dataid_csv_parser import (
     parse_dataid_file,
 )
 
-from test_config import (
+from tests.conftest import (
     DATAID_BAD_FIRST_LINE,
     DATAID_BAD_REM,
     DATAID_CW_ACCESS,

@@ -39,7 +39,7 @@ from models.fanuc_models import (
 )
 from utils.worker import BackgroundWorker, _drain
 
-from test_config import make_backup, make_field, make_var
+from tests.conftest import make_backup, make_field, make_var
 
 
 # ===========================================================================
