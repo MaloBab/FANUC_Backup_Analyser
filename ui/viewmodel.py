@@ -5,13 +5,13 @@ Pattern MVVM : l'UI ne connaît que le ViewModel, jamais les services directemen
 
 Recherche globale
 ─────────────────
-``search(text, scope)`` est appelé à chaque frappe dans la FiltersBar.
+search(text, scope) est appelé à chaque frappe dans la FiltersBar.
 Si un workspace est chargé, la recherche est lancée en arrière-plan via un
-``BackgroundWorker`` dédié (distinct du worker d'extraction).
-Quand les résultats arrivent, ``on_search_results(SearchResults)`` est déclenché
+BackgroundWorker dédié (distinct du worker d'extraction).
+Quand les résultats arrivent, on_search_results(SearchResults) est déclenché
 dans le thread Tkinter.
 
-Si le texte est vide, ``on_search_results`` est appelé avec un résultat vide
+Si le texte est vide, on_search_results est appelé avec un résultat vide
 afin que le MainPanel revienne à la vue précédente.
 """
 
@@ -25,7 +25,7 @@ from config.settings import Settings
 from models.fanuc_models import ExtractionResult, RobotBackup, WorkspaceResult
 from models.search_models import SearchQuery, SearchResults
 from services.orchestrator import ExtractionOrchestrator
-from services.searcher import VariableSearcher
+from services.searcher import Searcher
 from utils.worker import BackgroundWorker
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class AppViewModel:
     def __init__(self, settings: Settings) -> None:
         self.settings       = settings
         self._orchestrator  = ExtractionOrchestrator(settings)
-        self._searcher      = VariableSearcher()
+        self._searcher      = Searcher()
         self._worker        = BackgroundWorker()
         self._search_worker = BackgroundWorker()
 
@@ -96,15 +96,15 @@ class AppViewModel:
     def scan_workspace(self, path: str) -> None:
         root = Path(path)
         if not root.is_dir():
-            self._emit_log("Dossier invalide.", "error")
+            self._emit_log("Invalid Folder.", "error")
             return
         if self._worker.is_running:
-            self._emit_log("Un chargement est déjà en cours.", "warning")
+            self._emit_log("A loading is already in progress", "warning")
             return
         self.settings.last_input_dir = path
         self.is_busy = True
-        self._emit_status("Scan du workspace…")
-        self._emit_log(f"Scan de : {root.name}", "info")
+        self._emit_status("Scan workspace…")
+        self._emit_log(f"Scan : {root.name}", "info")
         self._worker.run(
             self._orchestrator.scan_workspace,
             args=(root,),
@@ -115,11 +115,11 @@ class AppViewModel:
 
     def load_backup(self, backup: RobotBackup) -> None:
         if self._worker.is_running:
-            self._emit_log("Un chargement est déjà en cours.", "warning")
+            self._emit_log("A loading is already in progress", "warning")
             return
         self.active_backup = backup
         self.is_busy       = True
-        self._emit_status(f"Chargement de {backup.name}…")
+        self._emit_status(f"Loading {backup.name}…")
         self._emit_log(f"Parsing : {backup.path}", "info")
         self._worker.run(
             self._orchestrator.load_backup,
@@ -133,14 +133,14 @@ class AppViewModel:
 
     def start_extraction(self) -> None:
         if self._worker.is_running:
-            self._emit_log("Une extraction est déjà en cours.", "warning")
+            self._emit_log("An extraction is already in progress.", "warning")
             return
         if not self.input_dir or not self.input_dir.is_dir():
-            self._emit_log("Dossier source invalide ou absent.", "error")
+            self._emit_log("Invalid or missing source file.", "error")
             return
         self.is_busy = True
-        self._emit_status("Extraction en cours…")
-        self._emit_log(f"Démarrage sur : {self.input_dir}", "info")
+        self._emit_status("Extraction in progress…")
+        self._emit_log(f"Starting on : {self.input_dir}", "info")
         self._worker.run(
             self._orchestrator.run,
             args=(self.input_dir,),
@@ -155,7 +155,7 @@ class AppViewModel:
 
     def export_results(self, output_path: Path, fmt: str = "csv") -> None:
         if not self.last_result:
-            self._emit_log("Aucun résultat à exporter.", "warning")
+            self._emit_log("No result to export", "warning")
             return
         try:
             self._orchestrator.export(self.last_result, output_path, fmt)
@@ -172,7 +172,7 @@ class AppViewModel:
         """Lance une recherche sur tous les backups chargés.
 
         Appelé à chaque frappe dans la FiltersBar.
-        Si le texte est vide, notifie ``on_search_results`` avec un résultat
+        Si le texte est vide, notifie on_search_results avec un résultat
         vide pour que le MainPanel revienne à la vue normale.
         """
         # Texte vide → signaler résultat vide (retour à la vue normale)
@@ -181,8 +181,7 @@ class AppViewModel:
                 self.on_search_results(SearchResults(query=SearchQuery(text="")))
             return
 
-        loaded = [b for b in self.workspace.backups if b.loaded] \
-            if self.workspace else []
+        loaded = [b for b in self.workspace.backups if b.loaded] if self.workspace else []
         if not loaded:
             return
 

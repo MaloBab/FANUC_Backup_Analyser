@@ -26,19 +26,19 @@ class SettingsDialog(tk.Toplevel):
                  fg=PALETTE["accent"], font=FONTS["heading"]).pack(anchor="w", padx=20, pady=6)
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=16, pady=4)
 
-        tk.Label(self, text="Chemin Roboguide",
+        tk.Label(self, text="Chemin Kconvars",
                  bg=PALETTE["bg"], fg=PALETTE["text"], font=FONTS["body"]).pack(anchor="w", padx=20, pady=6)
 
         row = tk.Frame(self, bg=PALETTE["bg"])
         row.pack(fill="x", padx=20, pady=2)
-        self._rg_var = tk.StringVar(value=settings.roboguide_exe)
+        self._rg_var = tk.StringVar(value=settings.kconvars_exe)
         ttk.Entry(row, textvariable=self._rg_var).pack(side="left", fill="x", expand=True)
         ttk.Button(row, text="…", width=3,
                    command=self._browse_exe).pack(side="right", padx=(4, 0))
 
         tk.Label(self, text="Timeout conversion (secondes)",
                  bg=PALETTE["bg"], fg=PALETTE["text"], font=FONTS["body"]).pack(anchor="w", padx=20, pady=6)
-        self._timeout_var = tk.IntVar(value=settings.roboguide_timeout)
+        self._timeout_var = tk.IntVar(value=settings.kconvars_timeout)
         ttk.Spinbox(self, from_=10, to=600, increment=10,
                     textvariable=self._timeout_var, width=8).pack(anchor="w", padx=20)
 
@@ -53,7 +53,7 @@ class SettingsDialog(tk.Toplevel):
 
     def _browse_exe(self) -> None:
         path = filedialog.askopenfilename(
-            title="Sélectionner l'exécutable Roboguide",
+            title="Sélectionner l'exécutable Kconvars",
             filetypes=[("Exécutables", "*.exe"), ("Tous", "*.*")],
         )
         if path:
@@ -61,7 +61,7 @@ class SettingsDialog(tk.Toplevel):
 
     def _save(self) -> None:
         s = self._vm.settings
-        s.roboguide_exe = self._rg_var.get()
-        s.roboguide_timeout = self._timeout_var.get()
+        s.kconvars_exe = self._rg_var.get()
+        s.kconvars_timeout = self._timeout_var.get()
         s.save()
         self.destroy()

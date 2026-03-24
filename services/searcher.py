@@ -15,7 +15,7 @@ Deux modes de recherche
 
 Détection du mode
 ─────────────────
-``VariableSearcher.search_from_text()`` est le point d'entrée unique :
+``Searcher.search_from_text()`` est le point d'entrée unique :
 il détecte automatiquement le mode et délègue à ``search()`` ou ``resolve()``.
 
 Formes de chemin reconnues
@@ -106,12 +106,12 @@ def _build_path_query(text: str, scope: str) -> PathQuery | None:
     )
 
 
-class VariableSearcher:
+class Searcher:
     """Point d'entrée unique pour la recherche globale.
 
     Usage::
 
-        searcher = VariableSearcher()
+        searcher = Searcher()
         results  = searcher.search_from_text(text, scope, backups)
     """
 

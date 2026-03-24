@@ -125,7 +125,7 @@ class BackgroundWorker:
                 if self._on_done:
                     self._on_done(payload)
                 finished = True
-                break   # plus rien à traiter après une fin normale
+                break
 
             elif status == "error":
                 if self._on_error:
@@ -137,7 +137,6 @@ class BackgroundWorker:
                 if self._on_progress:
                     cur, tot, msg = payload
                     self._on_progress(cur, tot, msg)
-                # continuer à dépiler — il peut rester d'autres messages
 
         return finished
 

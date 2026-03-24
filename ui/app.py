@@ -1,5 +1,3 @@
-"""App — contrôleur racine Tkinter."""
-
 from __future__ import annotations
 import tkinter as tk
 
@@ -12,7 +10,6 @@ from ui.components.sidebar import SidebarPanel
 from ui.components.main_panel.main_panel import MainPanel
 from ui.components.statusbar import StatusBar
 from ui.viewmodel import AppViewModel
-
 
 class App:
     def __init__(self, root: tk.Tk, settings: Settings) -> None:

@@ -19,17 +19,10 @@ class Settings:
     last_input_dir:  str = ""
     last_output_dir: str = ""
 
-    roboguide_exe:     str = ""  #TODO
-    roboguide_timeout: int = 120
+    kconvars_exe:     str = "C:/Program Files (x86)/FANUC/WinOLPC/bin/kconvars.exe"
+    kconvars_timeout: int = 120
 
     var_name_filter: list[str] = field(default_factory=list)
-    storage_filter: list[str] = field(
-        default_factory=lambda: ["CMOS", "DRAM", "SHADOW"]
-    )
-
-    access_filter: list[str] = field(
-        default_factory=lambda: ["RW", "RO"]
-    )
 
     window_title: str = "FANUC Variable Extractor"
     window_size:  str = "1200x750"
