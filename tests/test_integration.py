@@ -16,7 +16,11 @@ from models.fanuc_models import (
     RobotBackup,
     WorkspaceResult,
 )
+from services.converter.vr_sv_converter import VAConverter
+from services.exporter import VariableExporter
 from services.orchestrator import ExtractionOrchestrator
+from services.parser.dataid_csv_parser import DataIdCsvParser
+from services.parser.va_parser import VAParser
 from services.searcher import Searcher
 
 from conftest import (
@@ -37,7 +41,12 @@ from conftest import (
 
 @pytest.fixture
 def orch(settings: Settings) -> ExtractionOrchestrator:
-    return ExtractionOrchestrator(settings)
+    return ExtractionOrchestrator(
+                parsers   = [DataIdCsvParser(), VAParser()],
+                converter = VAConverter,
+                exporter  = VariableExporter(),
+                settings  = settings,
+            )
 
 
 @pytest.fixture

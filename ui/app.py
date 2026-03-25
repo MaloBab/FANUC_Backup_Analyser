@@ -1,3 +1,21 @@
+"""
+ui/app.py
+─────────
+Fenêtre racine — point d'entrée de la couche UI.
+
+Correction appliquée
+────────────────────
+``AppViewModel`` reçoit désormais ``root`` directement dans son constructeur
+via le paramètre ``tk_root``. L'ancien appel ``vm.set_tk_root(root)`` dans
+``_bind_viewmodel()`` est supprimé — il restait une fenêtre de temps entre
+la construction du ViewModel et l'injection de la root, pendant laquelle
+tout déclenchement d'un polling aurait causé un ``AttributeError`` (accès à
+``self._tk_root`` avant affectation).
+
+La référence ``tk.Misc`` est utilisée comme type (et non ``tk.Tk``) pour
+permettre l'injection d'un frame ou d'un toplevel dans les tests.
+"""
+
 from __future__ import annotations
 import tkinter as tk
 
@@ -11,11 +29,16 @@ from ui.components.main_panel.main_panel import MainPanel
 from ui.components.statusbar import StatusBar
 from ui.viewmodel import AppViewModel
 
+
 class App:
     def __init__(self, root: tk.Tk, settings: Settings) -> None:
-        self._root      = root
-        self._settings  = settings
-        self._viewmodel = AppViewModel(settings)
+        self._root     = root
+        self._settings = settings
+
+        # CORRECTIF : tk_root injecté dès la construction — plus de set_tk_root()
+        # post-construction qui laissait une fenêtre de temps sans référence valide.
+        self._viewmodel = AppViewModel(settings, tk_root=root)
+
         self._configure_root()
         apply_theme(self._root)
         self._build_layout()
@@ -76,7 +99,9 @@ class App:
         self._main.display_search_results(results)
 
     def _bind_viewmodel(self) -> None:
-        self._viewmodel.set_tk_root(self._root)
+        # CORRECTIF : set_tk_root() supprimé — la root est déjà injectée dans
+        # le constructeur d'AppViewModel. Ce site d'appel était redondant et
+        # masquait le vrai moment d'injection.
         self._viewmodel.on_status_change   = self._statusbar.update_status
         self._viewmodel.on_progress_change = self._statusbar.update_progress
         self._viewmodel.on_log_message     = self._main.append_log

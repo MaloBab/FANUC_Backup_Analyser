@@ -16,22 +16,28 @@ afin que le MainPanel revienne à la vue précédente.
 
 Corrections appliquées
 ──────────────────────
-1. **Debounce de la recherche** (150 ms) — les frappes rapides ne lançaient
-   pas de nouvelle recherche quand le worker était occupé, laissant l'UI
-   afficher des résultats obsolètes. Désormais, chaque frappe annule le timer
-   précédent et planifie un nouveau déclenchement après 150 ms. À l'expiration
-   du timer, le texte **courant** (pas celui de la frappe initiale) est utilisé.
-   Si le worker est encore occupé, on replanifie automatiquement.
+1. **Injection de ``tk_root`` dans le constructeur** — l'ancien ``set_tk_root()``
+   post-construction accédait à ``tk._default_root`` comme fallback (attribut
+   privé CPython, non documenté, susceptible de changer ou d'être absent).
+   ``tk_root`` est désormais un paramètre optionnel du constructeur avec valeur
+   par défaut ``None``.
 
-2. **Gestion de ``is_busy`` dans ``_load_all_backups``** — en cas d'erreur de
-   conversion (``ConverterError``), ``is_busy`` restait ``True`` indéfiniment car
-   ``_on_extraction_error`` n'appelait pas ``_load_all_backups`` pour continuer
-   la séquence. La closure ``_on_error_partial`` remet ``is_busy`` à ``False`` et
-   informe l'utilisateur sans bloquer le chargement des backups suivants.
+   Migration :
+     Avant : vm = AppViewModel(settings)
+             vm.set_tk_root(root)
+     Après : vm = AppViewModel(settings, tk_root=root)
 
-3. **Uniformisation de la langue** — tous les messages utilisateur sont
-   désormais en français. Les chaînes anglaises ("Invalid Folder.", "A loading
-   is already in progress", "founded"…) ont été corrigées.
+   Rétrocompat : ``set_tk_root()`` est conservé pour permettre une migration
+   progressive si d'autres sites d'appel existent.
+
+2. **Debounce de la recherche** (150 ms) — chaque frappe annule le timer
+   précédent et planifie un nouveau déclenchement après 150 ms.
+
+3. **Gestion de ``is_busy`` dans ``_load_all_backups``** — en cas d'erreur de
+   conversion, ``is_busy`` restait ``True`` indéfiniment. La closure
+   ``_on_error_partial`` remet ``is_busy`` à ``False`` sans bloquer les suivants.
+
+4. **Uniformisation de la langue** — tous les messages utilisateur sont en français.
 """
 
 from __future__ import annotations
@@ -61,11 +67,25 @@ _SEARCH_DEBOUNCE_MS = 150
 
 
 class AppViewModel:
-    """État global de l'application + commandes déclenchables par l'UI."""
+    """État global de l'application + commandes déclenchables par l'UI.
 
-    def __init__(self, settings: Settings) -> None:
+    :param settings: configuration applicative.
+    :param tk_root:  fenêtre racine Tkinter, requise pour ``after()`` et les timers.
+                     Peut être ``None`` uniquement dans les tests unitaires qui
+                     n'impliquent pas de polling asynchrone.
+    :param orchestrator: orchestrateur injecté (optionnel — construit par défaut).
+                         Permettre l'injection facilite les tests d'intégration.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        tk_root: tk.Misc | None = None,
+        orchestrator: ExtractionOrchestrator | None = None,
+    ) -> None:
         self.settings       = settings
-        self._orchestrator  = ExtractionOrchestrator(settings)
+        self._tk_root       = tk_root          # CORRECTIF : injecté dès la construction
+        self._orchestrator  = orchestrator or _build_default_orchestrator(settings)
         self._searcher      = Searcher()
         self._worker        = BackgroundWorker()
         self._search_worker = BackgroundWorker()
@@ -87,7 +107,6 @@ class AppViewModel:
         self.workspace:     WorkspaceResult | None  = None
         self.active_backup: RobotBackup | None      = None
 
-        self._tk_root:              tk.Tk | None = None
         self._poll_generation:        int = 0
         self._search_poll_generation: int = 0
 
@@ -96,10 +115,18 @@ class AppViewModel:
         self._search_timer_id:  str | None             = None  # after() id
 
     # ------------------------------------------------------------------
-    # Injection
+    # Injection post-construction (rétrocompatibilité)
     # ------------------------------------------------------------------
 
-    def set_tk_root(self, root: tk.Tk) -> None:
+    def set_tk_root(self, root: tk.Misc) -> None:
+        """Injecte la référence à la fenêtre Tkinter.
+
+        .. deprecated::
+            Préférer l'injection via le constructeur :
+            ``AppViewModel(settings, tk_root=root)``.
+            Cette méthode est conservée pour la compatibilité avec les sites
+            d'appel existants mais sera supprimée dans une version future.
+        """
         self._tk_root = root
 
     # ------------------------------------------------------------------
@@ -122,11 +149,9 @@ class AppViewModel:
     def scan_workspace(self, path: str) -> None:
         root = Path(path)
         if not root.is_dir():
-            # CORRECTIF langue : message en français
             self._emit_log("Dossier invalide ou introuvable.", "error")
             return
         if self._worker.is_running:
-            # CORRECTIF langue : message en français
             self._emit_log("Un chargement est déjà en cours.", "warning")
             return
         self.settings.last_input_dir = path
@@ -143,7 +168,6 @@ class AppViewModel:
 
     def load_backup(self, backup: RobotBackup) -> None:
         if self._worker.is_running:
-            # CORRECTIF langue : message en français
             self._emit_log("Un chargement est déjà en cours.", "warning")
             return
         self.active_backup = backup
@@ -162,11 +186,9 @@ class AppViewModel:
 
     def start_extraction(self) -> None:
         if self._worker.is_running:
-            # CORRECTIF langue : message en français
             self._emit_log("Une extraction est déjà en cours.", "warning")
             return
         if not self.input_dir or not self.input_dir.is_dir():
-            # CORRECTIF langue : message en français
             self._emit_log("Dossier source invalide ou absent.", "error")
             return
         self.is_busy = True
@@ -204,28 +226,24 @@ class AppViewModel:
 
         Appelé à chaque frappe dans la FiltersBar.
 
-        CORRECTIF : debounce de ``_SEARCH_DEBOUNCE_MS`` ms.
         Chaque appel annule le timer précédent et replanifie. La recherche
-        n'est effectivement lancée qu'après la dernière frappe. Le texte
-        utilisé est toujours le texte courant au moment du déclenchement
-        (pas celui de la frappe qui a armé le timer).
+        n'est effectivement lancée qu'après ``_SEARCH_DEBOUNCE_MS`` ms
+        d'inactivité. Le texte utilisé est toujours le texte courant au moment
+        du déclenchement (pas celui de la frappe qui a armé le timer).
 
         Si le texte est vide, notifie immédiatement ``on_search_results``
         avec un résultat vide pour que le MainPanel revienne à la vue normale.
         """
-        # Annuler le timer en cours, quelle que soit la situation
         if self._search_timer_id is not None and self._tk_root is not None:
             self._tk_root.after_cancel(self._search_timer_id)
             self._search_timer_id = None
 
-        # Texte vide → retour immédiat à la vue normale
         if not text.strip():
             self._pending_search = None
             if self.on_search_results:
                 self.on_search_results(SearchResults(query=SearchQuery(text="")))
             return
 
-        # Mémoriser la requête courante et armer le timer
         self._pending_search = (text.strip(), scope)
         if self._tk_root is not None:
             self._search_timer_id = self._tk_root.after(
@@ -255,16 +273,13 @@ class AppViewModel:
             return
 
         if self._search_worker.is_running:
-            # Worker encore occupé : replanifier après un court délai
             if self._tk_root is not None:
                 self._search_timer_id = self._tk_root.after(
                     100,
                     self._fire_search,
                 )
-            # _pending_search reste armé — sera relu à la prochaine tentative
             return
 
-        # Consommer la requête en attente et lancer le worker
         self._pending_search = None
         self._search_worker.run(
             self._searcher.search_from_text,
@@ -282,6 +297,7 @@ class AppViewModel:
         self._poll_generation += 1
         gen = self._poll_generation
         if self._tk_root:
+            # CORRECTIF : utilise self._tk_root (injecté) — plus de tk._default_root
             self._tk_root.after(100, lambda: self._poll(gen))
         else:
             self._poll(gen)
@@ -295,7 +311,7 @@ class AppViewModel:
             self._tk_root.after(100, lambda: self._poll(generation))
 
     # ------------------------------------------------------------------
-    # Polling — worker de recherche (intervalle court pour la réactivité)
+    # Polling — worker de recherche
     # ------------------------------------------------------------------
 
     def _start_search_poll(self) -> None:
@@ -322,7 +338,6 @@ class AppViewModel:
         self.workspace = workspace
         self.is_busy   = False
         n = workspace.robot_count
-        # CORRECTIF langue : "founded" → "trouvé(s)"
         self._emit_status(f"Workspace analysé — {n} backup(s) trouvé(s)")
         self._emit_log(f"Workspace : {n} robot(s) dans {workspace.root_path.name}", "info")
         if self.on_workspace_ready:
@@ -333,9 +348,8 @@ class AppViewModel:
     def _load_all_backups(self, workspace: WorkspaceResult) -> None:
         """Charge les backups du workspace séquentiellement.
 
-        CORRECTIF is_busy : en cas d'erreur sur un backup, ``_on_error_partial``
-        remet ``is_busy`` à ``False``, logue l'erreur et continue avec le
-        backup suivant — le chargement ne se bloque plus indéfiniment.
+        En cas d'erreur sur un backup, ``_on_error_partial`` remet ``is_busy``
+        à ``False``, logue l'erreur et continue avec le backup suivant.
         """
         pending = [b for b in workspace.backups if not b.loaded]
         if not pending:
@@ -374,12 +388,10 @@ class AppViewModel:
             self._emit_status(msg)
             self._emit_log(msg, "error")
             logger.exception("Erreur chargement backup", exc_info=exc)
-            # Marquer le backup comme chargé (en erreur) pour sortir de la liste pending
             backup.loaded = True
             backup.errors.append(str(exc))
             if self.on_backup_loaded:
                 self.on_backup_loaded(backup)
-            # Continuer avec le prochain backup
             self._load_all_backups(workspace)
 
         self._worker.run(
@@ -459,7 +471,29 @@ class AppViewModel:
         logger.log(_LOG_LEVELS.get(level, logging.INFO), msg)
         if self.on_log_message:
             self.on_log_message(msg, level)
-            
-    def emit_log(self, msg: str, level: str = "info") -> None:
-        """API publique pour les composants UI."""
-        self._emit_log(msg, level)
+
+
+# ---------------------------------------------------------------------------
+# Factory par défaut (wiring de production)
+# ---------------------------------------------------------------------------
+
+def _build_default_orchestrator(settings: Settings) -> ExtractionOrchestrator:
+    """Construit l'orchestrateur avec les dépendances concrètes de production.
+
+    Ce wiring est centralisé ici pour que le ViewModel reste indépendant des
+    classes concrètes. Les tests peuvent injecter leurs propres mocks via le
+    paramètre ``orchestrator`` du constructeur de ``AppViewModel``.
+    """
+    # Import local pour éviter les imports circulaires et garder la couche
+    # ViewModel indépendante des implémentations concrètes.
+    from services.converter.vr_sv_converter import VAConverter
+    from services.exporter import VariableExporter
+    from services.parser.dataid_csv_parser import DataIdCsvParser
+    from services.parser.va_parser import VAParser
+
+    return ExtractionOrchestrator(
+        parsers   = [DataIdCsvParser(), VAParser()],
+        converter = VAConverter,
+        exporter  = VariableExporter(),
+        settings  = settings,
+    )

@@ -6,20 +6,39 @@ Coordonne la conversion (kconvars) et le parsing sans que l'UI ne connaisse
 les détails.
 Pattern : Facade + Observer (via callbacks de progression) + Strategy (parsers).
 
+Refactoring appliqué — Dependency Inversion (SOLID « D »)
+──────────────────────────────────────────────────────────
+L'orchestrateur reçoit désormais ses dépendances par injection de constructeur
+(parser, converter, exporter) sous forme de Protocoles définis dans
+``services/ports.py``. Il n'instancie plus aucune classe concrète.
+
+Avantages :
+  - Testabilité : chaque dépendance peut être remplacée par un mock sans patcher.
+  - Extensibilité : ajouter un format = injecter un nouveau parser, sans toucher
+    à cette classe.
+  - Respect strict du DIP : l'orchestrateur dépend d'abstractions, pas de concrets.
+
+Wiring (dans main.py ou un module factory) :
+  orchestrator = ExtractionOrchestrator(
+      parsers   = [DataIdCsvParser(), VAParser()],
+      converter = VAConverter,          # classe, pas instance (classmethod)
+      exporter  = VariableExporter(),
+      settings  = settings,
+  )
+
 Sélection automatique du parser
 ────────────────────────────────
 ``_select_parser()`` parcourt la liste ``_parsers`` dans l'ordre de priorité et
 retourne le premier dont ``can_parse()`` retourne ``True``.  Pour ajouter un
-nouveau format, il suffit d'instancier le parser correspondant dans ``__init__``
-— aucune autre modification n'est nécessaire.
+nouveau format, injecter le parser correspondant dans la liste ``parsers`` passée
+au constructeur — aucune modification de cette classe n'est nécessaire.
 
-Ordre de priorité actuel :
+Ordre de priorité recommandé :
   1. ``DataIdCsvParser``  — robots nouvelle génération (DATAID.CSV)
   2. ``VAParser``         — robots classiques (fichiers .VA)
 
 ``DataIdCsvParser`` est testé en premier pour éviter qu'un dossier contenant
-à la fois un DATAID.CSV et des fichiers .VA soit mal classifié (le DATAID.CSV
-est le format faisant autorité sur les robots récents).
+à la fois un DATAID.CSV et des fichiers .VA soit mal classifié.
 
 Conversion automatique
 ──────────────────────
@@ -33,33 +52,12 @@ les trois conditions suivantes sont réunies :
 Si la conversion échoue, l'erreur est remontée immédiatement à l'UI
 (``ConverterError`` propagée — pas de dégradation silencieuse).
 
-Structure workspace supportée
-──────────────────────────────
-``scan_workspace()`` détecte automatiquement deux structures :
-  • dossier racine contenant des sous-dossiers (un par robot)
-  • dossier racine lui-même contenant directement les fichiers backup
-
-Comptage des .VA
-────────────────
-``scan_workspace()`` peuple ``RobotBackup.va_file_count`` au moment du scan
-(une seule passe disque). La couche de présentation (``PageRenderer``) utilise
-ce compteur directement sans refaire de ``rglob`` à chaque rendu.
-
 Gestion des exceptions dans ``load_backup``
 ────────────────────────────────────────────
-Le ``except`` autour du parsing attrape désormais uniquement
+Le ``except`` autour du parsing attrape uniquement
 ``(OSError, ValueError, TypeError)`` — les exceptions métier identifiées dans
-les parseurs. Un ``except Exception`` trop large masquait silencieusement les
+les parseurs. Un ``except Exception`` trop large masquerait silencieusement les
 bugs de programmation (``AttributeError``, ``MemoryError``, etc.).
-
-Note sur le ``progress_cb``
-───────────────────────────
-Les callbacks de progression sont appelés depuis le thread worker (c'est
-intentionnel : l'orchestrateur n'a pas connaissance de Tkinter). La garantie
-de thread-safety est assurée par ``BackgroundWorker._progress_proxy`` qui
-intercepte le ``progress_cb`` et enfile les notifications dans la queue FIFO
-avant qu'elles ne soient délivrées au thread Tkinter via ``poll_result()``.
-L'orchestrateur n'a donc rien à changer de ce côté.
 """
 
 from __future__ import annotations
@@ -71,13 +69,10 @@ from typing import Callable
 from config.settings import Settings
 from models.fanuc_models import (
     ExtractionResult,
-    RobotBackup, WorkspaceResult,
+    RobotBackup,
+    WorkspaceResult,
 )
-from services.converter.vr_sv_converter import VAConverter
-from services.parser.base_parser import BackupParser, ProgressCallback
-from services.parser.va_parser import VAParser
-from services.parser.dataid_csv_parser import DataIdCsvParser
-from services.exporter import VariableExporter
+from services.interfaces import IBackupParser, IConverter, IExporter, ProgressCallback
 
 logger = logging.getLogger(__name__)
 
@@ -88,21 +83,35 @@ _CONVERTIBLE_EXTENSIONS = {".sv", ".vr"}
 class ExtractionOrchestrator:
     """Point d'entrée unique pour l'UI.
 
-    Sélectionne automatiquement le parser adapté à chaque backup via la liste
-    ``_parsers``.  Pour ajouter un nouveau format, instancier le parser dans
-    ``__init__`` et l'insérer dans ``_parsers`` à la position souhaitée.
+    Reçoit ses dépendances par injection (DIP) :
+      - ``parsers``   : liste ordonnée de parsers (Strategy Pattern)
+      - ``converter`` : classe convertisseur (Template Method Pattern)
+      - ``exporter``  : exporteur de résultats (Strategy Pattern)
+      - ``settings``  : configuration applicative
+
+    Pour ajouter un nouveau format de backup, injecter le parser correspondant
+    en tête de la liste ``parsers`` — aucune modification de cette classe
+    n'est nécessaire.
     """
 
-    def __init__(self, settings: Settings) -> None:
-        self._settings = settings
-        self._exporter = VariableExporter()
+    def __init__(
+        self,
+        parsers: list[IBackupParser],
+        converter: IConverter,
+        exporter: IExporter,
+        settings: Settings,
+    ) -> None:
+        """Initialise l'orchestrateur avec ses dépendances injectées.
 
-        # Ordre de priorité : DataIdCsvParser avant VAParser.
-        # Le premier parser dont can_parse() retourne True est utilisé.
-        self._parsers: list[BackupParser] = [
-            DataIdCsvParser(),
-            VAParser(),
-        ]
+        :param parsers:   liste ordonnée de parsers (priorité décroissante).
+        :param converter: implémentation de la conversion binaire→texte.
+        :param exporter:  implémentation de l'export des résultats.
+        :param settings:  configuration de l'application (chemin exe, timeout…).
+        """
+        self._parsers   = parsers
+        self._converter = converter
+        self._exporter  = exporter
+        self._settings  = settings
 
     # ------------------------------------------------------------------
     # Interface publique
@@ -131,16 +140,14 @@ class ExtractionOrchestrator:
         structure pour permettre à l'UI d'afficher la liste des robots avant
         le chargement.
 
-        CORRECTIF : peuple ``RobotBackup.va_file_count`` lors du scan afin
-        d'éviter un ``rglob`` disque à chaque rendu dans ``PageRenderer``.
+        Peuple ``RobotBackup.va_file_count`` lors du scan afin d'éviter un
+        ``rglob`` disque à chaque rendu dans ``PageRenderer``.
 
         :param root_path: dossier racine contenant les sous-dossiers robots.
         :returns: ``WorkspaceResult`` avec un ``RobotBackup`` par sous-dossier.
         """
         result = WorkspaceResult(root_path=root_path)
 
-        # Chercher les sous-dossiers directs reconnus par au moins un parser
-        # OU nécessitant une conversion
         candidates = sorted(
             p for p in root_path.iterdir()
             if p.is_dir() and (
@@ -154,8 +161,8 @@ class ExtractionOrchestrator:
             self._select_parser(root_path) is not None
             or _needs_conversion(root_path)
         ):
-            fmt     = self._detect_format(root_path)
-            va_cnt  = _count_va_files(root_path)
+            fmt    = self._detect_format(root_path)
+            va_cnt = _count_va_files(root_path)
             result.backups.append(
                 RobotBackup(name=root_path.name, path=root_path, format=fmt,
                             va_file_count=va_cnt)
@@ -188,22 +195,21 @@ class ExtractionOrchestrator:
         """Parse un backup robot et peuple ``backup.variables``.
 
         Si le dossier nécessite une conversion (critères ``_needs_conversion``),
-        appelle ``convert_backup()`` avant le parsing.  La progression est
+        appelle le convertisseur injecté avant le parsing.  La progression est
         partagée sur ``total_steps`` steps : conversion = step_offset + 1,
         parsing = step_offset + 2.
 
         En cas d'échec de la conversion, une ``ConverterError`` est propagée
         immédiatement — l'UI est chargée de l'afficher à l'utilisateur.
 
-        CORRECTIF : le ``except`` autour du parsing attrape désormais uniquement
+        Le ``except`` autour du parsing attrape uniquement
         ``(OSError, ValueError, TypeError)`` — les exceptions métier connues.
-        Un ``except Exception`` masquait silencieusement les bugs de
+        Un ``except Exception`` masquerait silencieusement les bugs de
         programmation (``AttributeError``, ``MemoryError``, etc.).
 
         :param backup:       ``RobotBackup`` à charger.
         :param progress_cb:  callback ``(current, total, message)`` optionnel.
-        :param step_offset:  décalage dans la progression globale (pour les
-                             workspaces multi-backups).
+        :param step_offset:  décalage dans la progression globale.
         :param total_steps:  nombre total de steps de la progression globale.
         :returns: le même objet ``backup`` mis à jour.
         """
@@ -216,7 +222,7 @@ class ExtractionOrchestrator:
             )
             logger.info("Conversion nécessaire pour '%s'.", backup.name)
 
-            va_paths = VAConverter.convert_files(
+            va_paths = self._converter.convert_files(
                 backup_dir=backup.path,
                 settings=self._settings,
             )
@@ -226,7 +232,6 @@ class ExtractionOrchestrator:
                 ", ".join(p.name for p in va_paths),
             )
 
-            # Mise à jour du format et du comptage maintenant que le .VA existe
             backup.format        = self._detect_format(backup.path)
             backup.va_file_count = _count_va_files(backup.path)
 
@@ -249,10 +254,6 @@ class ExtractionOrchestrator:
         try:
             variables = parser.parse(backup.path, progress_cb)
         except (OSError, ValueError, TypeError) as exc:
-            # CORRECTIF : on n'attrape que les exceptions métier connues —
-            # OSError (disque), ValueError / TypeError (données malformées).
-            # Les exceptions inattendues (bugs) se propagent vers le worker
-            # qui les renvoie via on_error au thread Tkinter.
             msg = f"Erreur de parsing pour '{backup.name}' : {exc}"
             logger.exception(msg)
             backup.errors.append(msg)
@@ -276,8 +277,7 @@ class ExtractionOrchestrator:
         """Charge tous les backups d'un workspace avec une progression unifiée.
 
         Chaque backup compte pour 2 steps (conversion + parsing), qu'une
-        conversion soit nécessaire ou non — la progression reste linéaire
-        et prévisible.
+        conversion soit nécessaire ou non — la progression reste linéaire.
 
         En cas d'erreur de conversion sur un backup, la ``ConverterError``
         est propagée immédiatement et stoppe le chargement.
@@ -287,7 +287,7 @@ class ExtractionOrchestrator:
         :returns: le même ``workspace`` avec tous les backups chargés.
         """
         backups     = workspace.backups
-        total_steps = len(backups) * 2  # 2 steps par backup
+        total_steps = len(backups) * 2
 
         for i, backup in enumerate(backups):
             offset = i * 2
@@ -304,7 +304,7 @@ class ExtractionOrchestrator:
     # Sélection du parser (Strategy)
     # ------------------------------------------------------------------
 
-    def _select_parser(self, path: Path) -> BackupParser | None:
+    def _select_parser(self, path: Path) -> IBackupParser | None:
         """Retourne le premier parser compatible avec *path*, ou ``None``.
 
         Parcourt ``_parsers`` dans l'ordre de priorité.  Le premier dont
@@ -363,17 +363,22 @@ def _needs_conversion(path: Path) -> bool:
 def _count_va_files(path: Path) -> int:
     """Compte les fichiers ``.VA`` dans *path* (récursif).
 
-    CORRECTIF : centralisé ici pour que le scan peuple ``RobotBackup.va_file_count``
-    une seule fois — la couche de présentation n'a plus besoin de refaire ce travail.
-
-    :returns: nombre de fichiers ``.VA``, ou 0 en cas d'erreur disque.
+    Centralisé ici pour que le scan peuple ``RobotBackup.va_file_count``
+    une seule fois — la couche de présentation n'a plus besoin de refaire
+    ce travail.
     """
     try:
-        return sum(1 for p in path.rglob("*") if p.suffix.lower() == ".va")
+        return sum(1 for _ in path.rglob("*.VA"))
     except OSError:
         return 0
 
 
-def _notify(cb: ProgressCallback | None, cur: int, tot: int, msg: str) -> None:
-    if cb:
-        cb(cur, tot, msg)
+def _notify(
+    cb: ProgressCallback | None,
+    current: int,
+    total: int,
+    message: str,
+) -> None:
+    """Appelle le callback de progression si fourni."""
+    if cb is not None:
+        cb(current, total, message)

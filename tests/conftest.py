@@ -22,6 +22,7 @@ from models.fanuc_models import (
     StorageType,
     VADataType,
 )
+from services.converter.vr_sv_converter import VAConverter
 from services.exporter import VariableExporter
 from services.orchestrator import ExtractionOrchestrator
 from services.parser.dataid_csv_parser import DataIdCsvParser
@@ -345,7 +346,12 @@ def settings() -> Settings:
 
 @pytest.fixture
 def orchestrator(settings: Settings) -> ExtractionOrchestrator:
-    return ExtractionOrchestrator(settings)
+    return ExtractionOrchestrator(
+                parsers   = [DataIdCsvParser(), VAParser()],
+                converter = VAConverter,
+                exporter  = VariableExporter(),
+                settings  = settings,
+            )
 
 
 @pytest.fixture

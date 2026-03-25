@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "fanuc-backup-analyser"
+version = "0.1.0"
+description = "Outil d'extraction de variables robots FANUC depuis des fichiers .VA / DATAID.CSV"
+readme = "README.md"
+requires-python = ">=3.10"
+# Pas de dépendances de production : stdlib uniquement (tkinter, pathlib, json, csv, subprocess…)
+dependencies = []
+
+[project.scripts]
+# Lancement via : fanuc-analyser (après pip install -e .)
+fanuc-analyser = "main:main"
+
+[project.optional-dependencies]
+# Installer avec : pip install -e ".[dev]"
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Affiche les logs capturés en cas d'échec
+log_cli       = false
+log_level     = "DEBUG"
+addopts       = "-v --tb=short"
+
+[tool.setuptools.packages.find]
+# Inclure tous les sous-packages automatiquement
+where = ["."]
+exclude = ["tests*"]
