@@ -21,6 +21,9 @@ class Settings:
 
     kconvars_exe:     str = "C:/Program Files (x86)/FANUC/WinOLPC/bin/kconvars.exe"
     kconvars_timeout: int = 120
+    
+    printtp_exe:     str = "C:/Program Files (x86)/FANUC/WinOLPC/bin/printtp.exe"
+    printtp_timeout: int = 60
 
     var_name_filter: list[str] = field(default_factory=list)
 
@@ -32,7 +35,7 @@ class Settings:
     def load(cls) -> Settings:
         if CONFIG_FILE.exists():
             try:
-                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                data  = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
                 valid = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
                 return cls(**valid)
             except Exception as exc:
@@ -41,7 +44,7 @@ class Settings:
                     exc,
                 )
         return cls()
-
+ 
     def save(self) -> None:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(

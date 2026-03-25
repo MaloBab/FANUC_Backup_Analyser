@@ -60,7 +60,7 @@ from models.fanuc_models import (
     ExtractionResult,
     RobotBackup, WorkspaceResult,
 )
-from services.converter import convert_backup, ConverterError, KconvarsNotFoundError
+from services.converter.vr_sv_converter import VAConverter
 from services.parser.base_parser import BackupParser, ProgressCallback
 from services.parser.va_parser import VAParser
 from services.parser.dataid_csv_parser import DataIdCsvParser
@@ -191,7 +191,8 @@ class ExtractionOrchestrator:
 
             # ConverterError / KconvarsNotFoundError propagées volontairement :
             # l'UI doit bloquer et informer l'utilisateur.
-            va_paths = convert_backup(
+            
+            va_paths = VAConverter.convert_files(
                 backup_dir=backup.path,
                 settings=self._settings,
             )

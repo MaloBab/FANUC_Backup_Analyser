@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from config.settings import Settings
-from services.converter import (
+from services.converter.vr_sv_converter import (
     ConverterError,
     KconvarsNotFoundError,
     _extract_version,
@@ -184,7 +184,7 @@ class TestWriteRobotIni:
 
 class TestFindKconvars:
 
-    def test_utilise_settings_roboguide_exe(self, tmp_path: Path) -> None:
+    def test_utilise_settings_kconvars_exe(self, tmp_path: Path) -> None:
         exe = tmp_path / "kconvars.exe"
         exe.write_bytes(b"")
         s = Settings()
@@ -195,9 +195,7 @@ class TestFindKconvars:
     def test_leve_erreur_si_introuvable(self, mocker) -> None:
         mocker.patch("shutil.which", return_value=None)
         s = Settings()
-        s.kconvars_exe = ""  # FIX: kconvars_exe
-        # Patch tous les candidats connus pour qu'ils n'existent pas
-        mocker.patch("services.converter._KCONVARS_CANDIDATES", [])
+        s.kconvars_exe = "" 
         with pytest.raises(KconvarsNotFoundError):
             _find_kconvars(s)
 
