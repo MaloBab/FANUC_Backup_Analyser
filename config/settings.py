@@ -1,8 +1,15 @@
 """
 Configuration centralisée de l'application.
+
+Corrections appliquées
+──────────────────────
+- ``save()`` utilise désormais ``dataclasses.asdict()`` au lieu de ``self.__dict__``.
+  Cela garantit que seuls les champs déclarés dans la dataclass sont sérialisés,
+  sans risque d'inclure des attributs privés ajoutés dynamiquement.
 """
 
 from __future__ import annotations
+import dataclasses
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,9 +28,6 @@ class Settings:
 
     kconvars_exe:     str = "C:/Program Files (x86)/FANUC/WinOLPC/bin/kconvars.exe"
     kconvars_timeout: int = 120
-    
-    printtp_exe:     str = "C:/Program Files (x86)/FANUC/WinOLPC/bin/printtp.exe"
-    printtp_timeout: int = 60
 
     var_name_filter: list[str] = field(default_factory=list)
 
@@ -35,7 +39,7 @@ class Settings:
     def load(cls) -> Settings:
         if CONFIG_FILE.exists():
             try:
-                data  = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
                 valid = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
                 return cls(**valid)
             except Exception as exc:
@@ -44,10 +48,10 @@ class Settings:
                     exc,
                 )
         return cls()
- 
+
     def save(self) -> None:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(
-            json.dumps(self.__dict__, indent=2, ensure_ascii=False),
+            json.dumps(dataclasses.asdict(self), indent=2, ensure_ascii=False),
             encoding="utf-8",
         )

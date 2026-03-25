@@ -12,8 +12,10 @@ Corrections appliquées
   ``csv``, ``csv_flat`` et ``json``. Le format ``"label"`` n'avait pas de
   handler et ``"csv_flat"``/``"json"`` étaient rejetés par la garde avant
   d'atteindre le dispatch.
-  → ``_SUPPORTED`` est maintenant dérivé directement des clés du dict de
-  dispatch, garantissant une cohérence structurelle permanente.
+  → ``_DISPATCH`` est maintenant un attribut de **classe** défini après la
+  déclaration des méthodes statiques — construit une seule fois, jamais
+  reconstruit à chaque appel de ``export()``. La liste des formats supportés
+  en est dérivée automatiquement via ``_DISPATCH.keys()``.
 """
 
 from __future__ import annotations
@@ -40,17 +42,12 @@ class ExportError(Exception):
 class VariableExporter:
     """Exporte une liste de ``RobotVariable`` vers CSV (résumé ou flat) ou JSON.
 
-    Les formats supportés sont définis par ``_DISPATCH`` ; la liste ``_SUPPORTED``
-    en est dérivée automatiquement — plus aucun risque de désynchronisation.
+    Les formats supportés sont définis par ``_DISPATCH`` (attribut de classe),
+    construit une seule fois à la fin de la définition de la classe.
+    Plus aucun risque de désynchronisation ni de reconstruction inutile.
     """
 
-    @classmethod
-    def _build_dispatch(cls) -> dict[str, _ExportFn]:
-        return {
-            "csv":      cls._csv_summary,
-            "csv_flat": cls._csv_flat,
-            "json":     cls._json,
-        }
+    _DISPATCH: dict[str, _ExportFn]
 
     def export(self, variables: list[RobotVariable], path: Path, fmt: str = "csv") -> None:
         """Exporte les variables vers le fichier indiqué dans le format demandé.
@@ -61,17 +58,16 @@ class VariableExporter:
         :raises ExportError: si le format n'est pas supporté ou si l'écriture échoue.
         """
         fmt = fmt.lower()
-        dispatch = self._build_dispatch()
 
-        if fmt not in dispatch:
-            supported = sorted(dispatch.keys())
+        if fmt not in self._DISPATCH:
+            supported = sorted(self._DISPATCH.keys())
             raise ExportError(
                 f"Format non supporté : {fmt!r}. Formats disponibles : {supported}"
             )
 
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            dispatch[fmt](variables, path)
+            self._DISPATCH[fmt](variables, path)
         except OSError as exc:
             raise ExportError(f"Écriture impossible vers {path} : {exc}") from exc
 
@@ -202,3 +198,10 @@ class VariableExporter:
             json.dumps([v.to_dict() for v in variables], indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
+
+
+VariableExporter._DISPATCH = {
+    "csv":      VariableExporter._csv_summary,
+    "csv_flat": VariableExporter._csv_flat,
+    "json":     VariableExporter._json,
+}

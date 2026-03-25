@@ -18,6 +18,12 @@ affiche une page dédiée sans modifier l'historique de navigation.
 Si le texte est vide, on revient à la page courante du navigateur.
 
 Double-clic sur un résultat : navigue vers la variable source dans son backup.
+
+Corrections appliquées
+──────────────────────
+- ``_render_page`` utilise désormais ``FieldDetailPage`` et ``FieldGroupPage``
+  au lieu du ``tuple`` polymorphe — dispatch exhaustivement typé, sans
+  ``isinstance(page, tuple)`` suivi d'accès positionnels fragiles.
 """
 
 from __future__ import annotations
@@ -31,9 +37,11 @@ from ui.viewmodel import AppViewModel
 from ui.components.filters_bar import FiltersBar
 from ui.components.main_panel.results_tree import ResultsTree
 from ui.components.main_panel.log_tab import LogTab
-from ui.components.main_panel._navigator import PageNavigator, Page
+from ui.components.main_panel._navigator import (
+    FieldDetailPage, FieldGroupPage, Page, PageNavigator,
+)
 from ui.components.main_panel._renderer import PageRenderer
-from models.fanuc_models import ExtractionResult, RobotBackup, WorkspaceResult
+from models.fanuc_models import ExtractionResult, RobotBackup, RobotVariable, WorkspaceResult
 from models.search_models import SearchResults
 
 if TYPE_CHECKING:
@@ -43,8 +51,8 @@ if TYPE_CHECKING:
 class MainPanel(tk.Frame):
     def __init__(self, parent: tk.Misc, vm: AppViewModel) -> None:
         super().__init__(parent, bg=PALETTE["bg"])
-        self._vm                           = vm
-        self._header: HeaderBar | None     = None
+        self._vm                                = vm
+        self._header: HeaderBar | None          = None
         self._last_search: SearchResults | None = None
         self._build()
 
@@ -160,25 +168,37 @@ class MainPanel(tk.Frame):
     # ------------------------------------------------------------------
 
     def _render_page(self, page: Page) -> None:
+        """Dispatch vers le renderer selon le type de page.
+
+        CORRECTIF : utilise les types ``FieldDetailPage`` et ``FieldGroupPage``
+        au lieu du ``tuple`` polymorphe — dispatch exhaustif et typé, sans
+        accès positionnels fragiles (``page[1]``, ``len(page) > 2``, etc.).
+        """
         self._last_search = None
+
         if isinstance(page, WorkspaceResult):
             self._renderer.render_workspace(page)
+
         elif isinstance(page, RobotBackup):
             loaded_before = page.loaded
             self._renderer.render_backup(page)
             if not loaded_before:
                 self._vm.load_backup(page)
-        elif isinstance(page, tuple):
-            value = page[1]
-            if isinstance(value, list):
-                source_all = page[2] if len(page) > 2 else None
-                self._renderer.render_subfields(value, source_all)
-            elif hasattr(value, "items"):
-                self._renderer.render_array(value)
-            else:
-                self._renderer.render_position(value)
-        else:
+
+        elif isinstance(page, RobotVariable):
             self._renderer.render_variable(page)
+
+        elif isinstance(page, FieldGroupPage):
+            # Sous-arbre de fields (struct imbriqué dans un tableau)
+            self._renderer.render_subfields(page.fields, page.source_all)
+
+        elif isinstance(page, FieldDetailPage):
+            # Field dont la valeur est un tableau ou une position
+            from models.fanuc_models import ArrayValue, PositionValue
+            if isinstance(page.value, ArrayValue):
+                self._renderer.render_array(page.value)
+            elif isinstance(page.value, PositionValue):
+                self._renderer.render_position(page.value)
 
     # ------------------------------------------------------------------
     # Header

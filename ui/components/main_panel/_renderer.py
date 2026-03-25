@@ -3,6 +3,18 @@ PageRenderer — rendu Treeview pour chaque type de page.
 
 Sépare la logique de rendu de la logique de navigation dans MainPanel.
 Ne gère pas la navigation, seulement l'affichage.
+
+Corrections appliquées
+──────────────────────
+1. **I/O disque supprimée** — ``render_workspace()`` utilisait ``b.path.rglob("*")``
+   à chaque rendu pour compter les fichiers .VA. Ce comptage est désormais
+   lu depuis ``b.va_file_count``, peuplé une seule fois lors du scan par
+   ``ExtractionOrchestrator.scan_workspace()``.
+
+2. **Types de page explicites** — les branches ``isinstance(page, tuple)``
+   dans ``_render_page`` de ``MainPanel`` sont remplacées par ``FieldDetailPage``
+   et ``FieldGroupPage``. Ce fichier reçoit les types déjà dispatchés — pas de
+   changement local dans le renderer, mais les imports reflètent les nouveaux types.
 """
 
 from __future__ import annotations
@@ -47,10 +59,12 @@ class PageRenderer:
         backups = [b for b in ws.backups if not query or query in b.name.lower()]
         self._tree.clear()
         for i, b in enumerate(backups):
-            state  = "✓ chargé" if b.loaded else "⏳ chargement…"
-            va_cnt = sum(1 for p in b.path.rglob("*") if p.suffix.lower() == ".va")
+            state = "✓ chargé" if b.loaded else "⏳ chargement…"
+            # CORRECTIF : b.va_file_count au lieu de b.path.rglob("*") —
+            # élimine l'I/O disque dans la couche de présentation.
+            # Le comptage est effectué une seule fois lors du scan workspace.
             self._tree.insert(
-                values=(f"📁  {b.name}", b.var_count or "—", va_cnt, state, str(b.path)),
+                values=(f"📁  {b.name}", b.var_count or "—", b.va_file_count, state, str(b.path)),
                 iid=str(id(b)),
                 tags=("even" if i % 2 == 0 else "odd", "robot"),
             )

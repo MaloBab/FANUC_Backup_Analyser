@@ -39,6 +39,19 @@ Structure workspace supportée
   • dossier racine contenant des sous-dossiers (un par robot)
   • dossier racine lui-même contenant directement les fichiers backup
 
+Comptage des .VA
+────────────────
+``scan_workspace()`` peuple ``RobotBackup.va_file_count`` au moment du scan
+(une seule passe disque). La couche de présentation (``PageRenderer``) utilise
+ce compteur directement sans refaire de ``rglob`` à chaque rendu.
+
+Gestion des exceptions dans ``load_backup``
+────────────────────────────────────────────
+Le ``except`` autour du parsing attrape désormais uniquement
+``(OSError, ValueError, TypeError)`` — les exceptions métier identifiées dans
+les parseurs. Un ``except Exception`` trop large masquait silencieusement les
+bugs de programmation (``AttributeError``, ``MemoryError``, etc.).
+
 Note sur le ``progress_cb``
 ───────────────────────────
 Les callbacks de progression sont appelés depuis le thread worker (c'est
@@ -118,6 +131,9 @@ class ExtractionOrchestrator:
         structure pour permettre à l'UI d'afficher la liste des robots avant
         le chargement.
 
+        CORRECTIF : peuple ``RobotBackup.va_file_count`` lors du scan afin
+        d'éviter un ``rglob`` disque à chaque rendu dans ``PageRenderer``.
+
         :param root_path: dossier racine contenant les sous-dossiers robots.
         :returns: ``WorkspaceResult`` avec un ``RobotBackup`` par sous-dossier.
         """
@@ -138,14 +154,20 @@ class ExtractionOrchestrator:
             self._select_parser(root_path) is not None
             or _needs_conversion(root_path)
         ):
-            fmt = self._detect_format(root_path)
+            fmt     = self._detect_format(root_path)
+            va_cnt  = _count_va_files(root_path)
             result.backups.append(
-                RobotBackup(name=root_path.name, path=root_path, format=fmt)
+                RobotBackup(name=root_path.name, path=root_path, format=fmt,
+                            va_file_count=va_cnt)
             )
         else:
             for sub in candidates:
-                fmt = self._detect_format(sub)
-                result.backups.append(RobotBackup(name=sub.name, path=sub, format=fmt))
+                fmt    = self._detect_format(sub)
+                va_cnt = _count_va_files(sub)
+                result.backups.append(
+                    RobotBackup(name=sub.name, path=sub, format=fmt,
+                                va_file_count=va_cnt)
+                )
 
         logger.info(
             "Workspace scanné : %d backup(s) trouvé(s) dans %s",
@@ -173,6 +195,11 @@ class ExtractionOrchestrator:
         En cas d'échec de la conversion, une ``ConverterError`` est propagée
         immédiatement — l'UI est chargée de l'afficher à l'utilisateur.
 
+        CORRECTIF : le ``except`` autour du parsing attrape désormais uniquement
+        ``(OSError, ValueError, TypeError)`` — les exceptions métier connues.
+        Un ``except Exception`` masquait silencieusement les bugs de
+        programmation (``AttributeError``, ``MemoryError``, etc.).
+
         :param backup:       ``RobotBackup`` à charger.
         :param progress_cb:  callback ``(current, total, message)`` optionnel.
         :param step_offset:  décalage dans la progression globale (pour les
@@ -189,9 +216,6 @@ class ExtractionOrchestrator:
             )
             logger.info("Conversion nécessaire pour '%s'.", backup.name)
 
-            # ConverterError / KconvarsNotFoundError propagées volontairement :
-            # l'UI doit bloquer et informer l'utilisateur.
-            
             va_paths = VAConverter.convert_files(
                 backup_dir=backup.path,
                 settings=self._settings,
@@ -202,8 +226,9 @@ class ExtractionOrchestrator:
                 ", ".join(p.name for p in va_paths),
             )
 
-            # Mise à jour du format maintenant que le .VA existe
-            backup.format = self._detect_format(backup.path)
+            # Mise à jour du format et du comptage maintenant que le .VA existe
+            backup.format        = self._detect_format(backup.path)
+            backup.va_file_count = _count_va_files(backup.path)
 
         # ── Étape 2 : parsing ────────────────────────────────────────────
         _notify(
@@ -223,8 +248,12 @@ class ExtractionOrchestrator:
 
         try:
             variables = parser.parse(backup.path, progress_cb)
-        except Exception as exc:
-            msg = f"Erreur inattendue lors du parsing de '{backup.name}' : {exc}"
+        except (OSError, ValueError, TypeError) as exc:
+            # CORRECTIF : on n'attrape que les exceptions métier connues —
+            # OSError (disque), ValueError / TypeError (données malformées).
+            # Les exceptions inattendues (bugs) se propagent vers le worker
+            # qui les renvoie via on_error au thread Tkinter.
+            msg = f"Erreur de parsing pour '{backup.name}' : {exc}"
             logger.exception(msg)
             backup.errors.append(msg)
             backup.loaded = True
@@ -329,6 +358,20 @@ def _needs_conversion(path: Path) -> bool:
     has_source = bool(suffixes & _CONVERTIBLE_EXTENSIONS)
 
     return not has_dataid and not has_va and has_source
+
+
+def _count_va_files(path: Path) -> int:
+    """Compte les fichiers ``.VA`` dans *path* (récursif).
+
+    CORRECTIF : centralisé ici pour que le scan peuple ``RobotBackup.va_file_count``
+    une seule fois — la couche de présentation n'a plus besoin de refaire ce travail.
+
+    :returns: nombre de fichiers ``.VA``, ou 0 en cas d'erreur disque.
+    """
+    try:
+        return sum(1 for p in path.rglob("*") if p.suffix.lower() == ".va")
+    except OSError:
+        return 0
 
 
 def _notify(cb: ProgressCallback | None, cur: int, tot: int, msg: str) -> None:

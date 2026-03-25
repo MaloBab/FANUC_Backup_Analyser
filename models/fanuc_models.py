@@ -1,19 +1,22 @@
 """
 Modèles de données — représentations fidèles de la structure des fichiers .VA FANUC.
 
-Convention sur FieldValue :
-  - str          : valeur scalaire normalisée (y compris "Uninitialized")
-  - ArrayValue   : tableau indexé — items scalaires ou PositionValue (ARRAY OF POSITION)
-  - PositionValue: position cartésienne/articulaire multilignes (variable scalaire POSITION)
-  - None         : absence de valeur (variable non encore parsée ou sans bloc de valeur)
+Convention sur ``FieldValue`` :
+  - ``str``          : valeur scalaire normalisée (y compris ``"Uninitialized"``)
+  - ``ArrayValue``   : tableau indexé — items scalaires ou ``PositionValue`` (``ARRAY OF POSITION``)
+  - ``PositionValue``: position cartésienne/articulaire multilignes (variable scalaire POSITION)
+  - ``None``         : absence de valeur (variable non encore parsée ou sans bloc de valeur)
 
 Modification
 ────────────
-PositionValue reçoit un champ label: str (défaut "") qui stocke le nom
+``PositionValue`` reçoit un champ ``label: str`` (défaut ``""``) qui stocke le nom
 de la position tel qu'il apparaît dans le fichier .VA entre apostrophes, par exemple
-'OR_Get_Ref' ou '' pour une position sans nom.
+``'OR_Get_Ref'`` ou ``''`` pour une position sans nom.
 Ce label est utilisé par le renderer pour afficher une preview significative au lieu
-de [N lignes].
+de ``[N lignes]``.
+
+``RobotBackup`` reçoit un champ ``va_file_count: int`` (défaut ``0``) peuplé lors
+du scan — élimine les I/O disque (rglob) dans la couche de présentation.
 """
 
 from __future__ import annotations
@@ -54,9 +57,9 @@ class ArrayValue:
     """Tableau indexé de valeurs scalaires ou de positions (index N-D → valeur).
 
     Les items peuvent être :
-      - str           : valeur scalaire (y compris "Uninitialized")
-      - None          : absence de valeur
-      - PositionValue : position FANUC (cas ARRAY[N] OF POSITION)
+      - ``str``           : valeur scalaire (y compris ``"Uninitialized"``)
+      - ``None``          : absence de valeur
+      - ``PositionValue`` : position FANUC (cas ``ARRAY[N] OF POSITION``)
     """
 
     items: dict[tuple[int, ...], str | None | PositionValue] = field(default_factory=dict)
@@ -72,8 +75,8 @@ class ArrayValue:
 class PositionValue:
     """Position FANUC multilignes (Group/Config/X/Y/Z/W/P/R ou J1..J9).
 
-    label stocke le nom entre apostrophes tel qu'il apparaît dans le fichier .VA,
-    par exemple "OR_Get_Ref" ou "" pour une position sans nom.
+    ``label`` stocke le nom entre apostrophes tel qu'il apparaît dans le fichier .VA,
+    par exemple ``"OR_Get_Ref"`` ou ``""`` pour une position sans nom.
     Ce champ est utilisé par le renderer pour afficher une preview significative.
     """
 
@@ -97,30 +100,30 @@ FieldValue  = ScalarValue | ArrayValue | PositionValue
 class RobotVarField:
     """Champ d'une variable structurée ou tableau de structs FANUC.
 
-    parent_index_nd encode l'index parent sous forme de tuple :
-      - None   : le field n'appartient pas à un élément de tableau (struct simple)
-      - (i,)   : tableau 1D, élément i
-      - (i, j) : tableau 2D, élément [i, j]
+    ``parent_index_nd`` encode l'index parent sous forme de tuple :
+      - ``None``   : le field n'appartient pas à un élément de tableau (struct simple)
+      - ``(i,)``   : tableau 1D, élément ``i``
+      - ``(i, j)`` : tableau 2D, élément ``[i, j]``
       - etc.
 
-    condition_handler est optionnel et n'est renseigné que par le
-    DataIdCsvParser (colonne ConditionHandler du DATAID.CSV).
-    Il vaut "" pour toutes les variables issues des fichiers .VA.
+    ``condition_handler`` est optionnel et n'est renseigné que par le
+    ``DataIdCsvParser`` (colonne ``ConditionHandler`` du DATAID.CSV).
+    Il vaut ``""`` pour toutes les variables issues des fichiers .VA.
     """
 
     full_name:         str                        # nom complet tel qu'il apparaît dans le .VA
-    parent_var:        str                        # variable parente (ex: "$AP_CUREQ", "NFPAM.TBC")
-    field_name:        str                        # nom du field seul (ex: "$PANE_EQNO", "CNT_SCALE")
+    parent_var:        str                        # variable parente (ex: ``"$AP_CUREQ"``, ``"NFPAM.TBC"``)
+    field_name:        str                        # nom du field seul (ex: ``"$PANE_EQNO"``, ``"CNT_SCALE"``)
     access:            AccessType
     data_type:         VADataType
-    type_detail:       str                        # type brut pur (ex: "SHORT", "ARRAY[9] OF BYTE")
+    type_detail:       str                        # type brut pur (ex: ``"SHORT"``, ``"ARRAY[9] OF BYTE"``)
     value:             FieldValue
     parent_index_nd:   tuple[int, ...] | None = None
     condition_handler: str                    = ""
 
     @property
     def parent_index(self) -> int | None:
-        """Premier index du parent (rétrocompat). None si struct simple."""
+        """Premier index du parent (rétrocompat). ``None`` si struct simple."""
         return self.parent_index_nd[0] if self.parent_index_nd else None
 
 
@@ -128,13 +131,13 @@ class RobotVarField:
 class RobotVariable:
     """Variable système ou Karel extraite d'un fichier .VA FANUC.
 
-    array_size  : produit total des dimensions (ex: 4×200 = 800).
-    array_shape : dimensions exactes sous forme de tuple (ex: (4, 200)).
-                      None pour les tableaux 1D (la taille suffit) et les scalaires.
+    ``array_size``  : produit total des dimensions (ex: 4×200 = 800).
+    ``array_shape`` : dimensions exactes sous forme de tuple (ex: ``(4, 200)``).
+                      ``None`` pour les tableaux 1D (la taille suffit) et les scalaires.
     """
 
     name:        str
-    namespace:   str                             # contenu entre crochets (ex: "*SYSTEM*", "TBSWMD45")
+    namespace:   str                             # contenu entre crochets (ex: ``"*SYSTEM*"``, ``"TBSWMD45"``)
     storage:     StorageType
     access:      AccessType
     data_type:   VADataType
@@ -157,12 +160,12 @@ class RobotVariable:
 
     @property
     def is_system(self) -> bool:
-        """True si la variable appartient au namespace *SYSTEM*."""
+        """``True`` si la variable appartient au namespace ``*SYSTEM*``."""
         return self.namespace == "*SYSTEM*"
 
     @property
     def is_struct(self) -> bool:
-        """True si la variable possède des fields."""
+        """``True`` si la variable possède des fields."""
         return bool(self.fields)
 
     def to_dict(self) -> dict:
@@ -205,28 +208,29 @@ class ExtractionResult:
 
 @dataclass
 class RobotBackup:
- 
-    name:      str
-    path:      Path
-    format:    str                 = "unknown"
-    variables: list               = field(default_factory=list)
-    errors:    list[str]          = field(default_factory=list)
-    loaded:    bool               = False
- 
-    tp_programs: list[TpProgram] = field(default_factory=list)
- 
+    """Représente un backup robot : un sous-dossier contenant des fichiers .VA.
+
+    ``va_file_count`` est peuplé par ``ExtractionOrchestrator.scan_workspace()``
+    au moment du scan. Cela évite de relancer un ``rglob`` disque à chaque
+    rafraîchissement de la couche de présentation.
+    """
+    name:          str
+    path:          Path
+    format:        str                  = "unknown"
+    variables:     list[RobotVariable]  = field(default_factory=list)
+    errors:        list[str]            = field(default_factory=list)
+    loaded:        bool                 = False
+    # CORRECTIF : comptage des .VA effectué une seule fois lors du scan,
+    # pas recompté à chaque rendu de page (supprime l'I/O dans PageRenderer).
+    va_file_count: int                  = 0
+
     @property
     def var_count(self) -> int:
         return len(self.variables)
- 
+
     @property
     def field_count(self) -> int:
         return sum(len(v.fields) for v in self.variables)
- 
-    @property
-    def tp_count(self) -> int:
-        """Nombre de programmes .TP convertis en .LS."""
-        return len(self.tp_programs)
 
 
 @dataclass
@@ -242,47 +246,6 @@ class WorkspaceResult:
     @property
     def loaded_count(self) -> int:
         return sum(1 for b in self.backups if b.loaded)
-
-
-# ---------------------------------------------------------------------------
-# Programme TP
-# ---------------------------------------------------------------------------
-
-@dataclass
-class TpProgram:
-    """Programme robot FANUC converti depuis .TP vers .LS.
- 
-    ``name``      : nom du programme sans extension (ex: ``"MAIN"``)
-    ``ls_path``   : chemin absolu du fichier ``.LS`` produit par PrintTP
-    ``content``   : contenu brut du fichier .LS (``None`` avant chargement)
-    ``load_error``: message d'erreur si la lecture a échoué (``None`` si OK)
-    """
- 
-    name:       str
-    ls_path:    Path
-    content:    str | None = None
-    load_error: str | None = None
-    
-    def load(self) -> None:
-        """Charge le contenu du .LS en mémoire. Idempotent, sans exception."""
-        if self.content is not None:
-            return
-        try:
-            self.content = self.ls_path.read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            self.load_error = str(exc)
-            
- 
-    @property
-    def is_loaded(self) -> bool:
-        return self.content is not None
- 
-    @property
-    def line_count(self) -> int:
-        if self.content is None:
-            return 0
-        return self.content.count("\n") + 1
- 
 
 
 # ---------------------------------------------------------------------------
