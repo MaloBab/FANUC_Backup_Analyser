@@ -522,11 +522,6 @@ class VAParser(BackupParser):
                 )
 
                 if is_pos_context:
-                    self._collect_position_item(
-                        lines, i, key, raw_val, var, current_array, source
-                    )
-                    # _collect_position_item avance i en interne via return
-                    # → on doit récupérer le nouvel i
                     i = self._collect_position_item(
                         lines, i, key, raw_val, var, current_array, source
                     )

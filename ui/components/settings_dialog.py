@@ -51,34 +51,6 @@ class SettingsDialog(tk.Toplevel):
 
         ttk.Separator(self, orient="horizontal").pack(fill="x", padx=16, pady=8)
 
-        # ── PrintTP ─────────────────────────────────────────────────────
-        self._section_label("PRINTTP  (.TP → .LS)")
-
-        tk.Label(
-            self,
-            text="Chemin PrintTP.exe  (laisser vide = détection automatique)",
-            bg=PALETTE["bg"], fg=PALETTE["text_dim"], font=FONTS["small"],
-        ).pack(anchor="w", padx=20, pady=(0, 2))
-
-        self._printtp_var = tk.StringVar(value=settings.printtp_exe)
-        self._build_exe_row(
-            label="Chemin PrintTP.exe",
-            var=self._printtp_var,
-            browse_cmd=self._browse_printtp,
-            show_label=False,
-        )
-
-        tk.Label(
-            self, text="Timeout conversion TP (secondes)",
-            bg=PALETTE["bg"], fg=PALETTE["text"], font=FONTS["body"],
-        ).pack(anchor="w", padx=20, pady=(6, 0))
-        self._printtp_timeout_var = tk.IntVar(value=settings.printtp_timeout)
-        ttk.Spinbox(
-            self, from_=10, to=300, increment=10,
-            textvariable=self._printtp_timeout_var, width=8,
-        ).pack(anchor="w", padx=20, pady=(0, 4))
-
-        ttk.Separator(self, orient="horizontal").pack(fill="x", padx=16, pady=8)
 
         # ── Boutons ─────────────────────────────────────────────────────
         btn_frame = tk.Frame(self, bg=PALETTE["bg"])
@@ -130,13 +102,6 @@ class SettingsDialog(tk.Toplevel):
         if path:
             self._kconvars_var.set(path)
 
-    def _browse_printtp(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Sélectionner PrintTP.exe",
-            filetypes=[("Exécutables", "*.exe"), ("Tous", "*.*")],
-        )
-        if path:
-            self._printtp_var.set(path)
 
     # ------------------------------------------------------------------
     # Sauvegarde
@@ -146,7 +111,5 @@ class SettingsDialog(tk.Toplevel):
         s = self._vm.settings
         s.kconvars_exe        = self._kconvars_var.get()
         s.kconvars_timeout    = self._kconvars_timeout_var.get()
-        s.printtp_exe         = self._printtp_var.get()
-        s.printtp_timeout     = self._printtp_timeout_var.get()
         s.save()
         self.destroy()

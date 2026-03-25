@@ -31,23 +31,25 @@ class FileConverter(ABC):
     
     @classmethod
     def extract_version(cls, backup_dir: Path) -> str:
-        """Lit SUMMARY.DG et extrait la version soft du backup.
-
-        Exemple de ligne source: Software Edition No.: V9.40P/55
-
-        Retourne _DEFAULT_VERSION si SUMMARY.DG est absent ou illisible.
-        """
         summary = backup_dir / "SUMMARY.DG"
         if not summary.exists():
             return cls.DEFAULT_VERSION
-
         try:
             lines = summary.read_text(encoding="utf-8", errors="replace").splitlines()
-            raw = lines[cls.SUMMARY_VERSION_LINE]         # ex: "Software Edition No.: V9.40P/55"
-            version = raw.split(":")[1].strip()           # → "V9.40P/55"
-            version = version.split("P")[0]               # → "V9.40"
-            return f"{version}-1"                         # → "V9.40-1"
-        except Exception:
+            line = lines[cls.SUMMARY_VERSION_LINE]
+            parts = line.split(":", 1)
+            if len(parts) < 2:
+                logger.debug("SUMMARY.DG ligne %d sans ':' : %r", cls.SUMMARY_VERSION_LINE, line)
+                return cls.DEFAULT_VERSION
+            raw = parts[1].strip()              
+            p_idx = raw.find("P")
+            if p_idx == -1:
+                logger.debug("Version sans 'P' dans SUMMARY.DG : %r", raw)
+                return cls.DEFAULT_VERSION
+            version = raw[:p_idx]              
+            return f"{version}-1"               
+        except (IndexError, OSError) as exc:
+            logger.debug("SUMMARY.DG illisible : %s", exc)
             return cls.DEFAULT_VERSION
 
     # --- CONTRATS (À implémenter par les enfants) ---

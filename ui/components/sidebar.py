@@ -121,7 +121,7 @@ class SidebarPanel(tk.Frame):
     def _scan(self) -> None:
         path = self._ws_var.get().strip()
         if not path or not Path(path).is_dir():
-            self._vm._emit_log("Veuillez sélectionner un dossier valide.", "error")  # noqa: SLF001
+            self._vm.emit_log("Veuillez sélectionner un dossier valide.", "error")
             return
         self._vm.scan_workspace(path)
 

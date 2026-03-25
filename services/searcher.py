@@ -340,9 +340,9 @@ class Searcher:
         for fld in fields:
             path = fld.full_name
 
-            def hit(value: str | None) -> SearchHit:
+            def hit(value: str | None, _path: str = path) -> SearchHit:
                 return SearchHit(backup_name=backup_name, source_file=source,
-                                 variable_name=var_name, match_path=path,
+                                 variable_name=var_name, match_path=_path,
                                  match_value=value)
 
             # full_name en priorité : permet la saisie partielle de chemin.
@@ -379,9 +379,9 @@ class Searcher:
             idx   = "[" + ",".join(str(k) for k in key) + "]"
             ipath = f"{array_path}{idx}"
 
-            def hit(value: str | None) -> SearchHit:
+            def hit(value: str | None, _path: str = ipath) -> SearchHit:
                 return SearchHit(backup_name=backup_name, source_file=source,
-                                 variable_name=var_name, match_path=ipath,
+                                 variable_name=var_name, match_path=_path,
                                  match_value=value)
 
             if isinstance(val, str) and val:

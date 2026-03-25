@@ -30,17 +30,8 @@ class VAConverter(FileConverter):
                 logger.debug("kconvars trouvé (settings) : %s", path)
                 return path
         
-        # 2. Chemin déduit depuis l'exécutable frère
-        if settings.printtp_exe:
-            sibling = Path(settings.printtp_exe).parent / "kconvars.exe"
-            if sibling.is_file():
-                logger.debug("kconvars trouvé (sibling PrintTP) : %s", sibling)
-                return sibling
 
-        raise ExeNotFoundError(
-            "kconvars.exe introuvable. Renseignez son chemin dans les paramètres "
-            "(Settings > Chemin Roboguide)."
-        )
+        raise ExeNotFoundError("kconvars.exe introuvable. Renseignez son chemin dans les paramètres (Settings > Chemin Roboguide).")
 
     @classmethod
     def _get_source_files(cls, backup_dir: Path) -> list[Path]:

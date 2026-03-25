@@ -24,13 +24,9 @@ import pytest
 
 from config.settings import Settings
 from services.converter.vr_sv_converter import (
+    VAConverter,
     ConverterError,
-    KconvarsNotFoundError,
-    _extract_version,
-    _find_kconvars,
-    _find_source_files,
-    _write_robot_ini,
-    convert_backup,
+    ExeNotFoundError,
 )
 
 
@@ -66,13 +62,13 @@ class TestFindSourceFiles:
 
     def test_retourne_fichier_sv(self, tmp_path: Path) -> None:
         backup = _make_backup(tmp_path, {"SYSVAR.SV": "data", "SUMMARY.DG": "x"})
-        files = _find_source_files(backup)
+        files = VAConverter._get_source_files(backup)
         assert len(files) == 1
         assert files[0].suffix.lower() == ".sv"
 
     def test_retourne_fichier_vr(self, tmp_path: Path) -> None:
         backup = _make_backup(tmp_path, {"NUMREG.VR": "data"})
-        files = _find_source_files(backup)
+        files = VAConverter._get_source_files(backup)
         assert len(files) == 1
         assert files[0].suffix.lower() == ".vr"
 
@@ -82,7 +78,7 @@ class TestFindSourceFiles:
             "SYSVAR.SV": "data",
             "readme.txt": "doc",
         })
-        files = _find_source_files(backup)
+        files = VAConverter._get_source_files(backup)
         assert all(f.suffix.lower() in {".sv", ".vr"} for f in files)
 
     def test_retourne_plusieurs_fichiers(self, tmp_path: Path) -> None:
@@ -91,7 +87,7 @@ class TestFindSourceFiles:
             "NUMREG.VR": "b",
             "POSREG.VR": "c",
         })
-        files = _find_source_files(backup)
+        files = VAConverter._get_source_files(backup)
         assert len(files) == 3
 
     def test_tri_alphabetique_insensible_casse(self, tmp_path: Path) -> None:
@@ -100,20 +96,20 @@ class TestFindSourceFiles:
             "alpha.vr": "a",
             "MANGO.VR": "m",
         })
-        files = _find_source_files(backup)
+        files = VAConverter._get_source_files(backup)
         noms = [f.name.lower() for f in files]
         assert noms == sorted(noms)
 
     def test_leve_erreur_si_aucun_fichier(self, tmp_path: Path) -> None:
         backup = _make_backup(tmp_path, {"SUMMARY.DG": "x", "readme.txt": "doc"})
         with pytest.raises(ConverterError, match=r"\.SV ou \.VR"):
-            _find_source_files(backup)
+            VAConverter._get_source_files(backup)
 
     def test_leve_erreur_dossier_vide(self, tmp_path: Path) -> None:
         backup = tmp_path / "empty"
         backup.mkdir()
         with pytest.raises(ConverterError):
-            _find_source_files(backup)
+            VAConverter._get_source_files(backup)
 
 
 # ---------------------------------------------------------------------------
@@ -124,32 +120,26 @@ class TestExtractVersion:
 
     def test_version_standard(self, tmp_path: Path) -> None:
         backup = _make_backup(tmp_path, {"SUMMARY.DG": _make_summary("V9.40P/55")})
-        assert _extract_version(backup) == "V9.40-1"
+        assert VAConverter.extract_version(backup) == "V9.40-1"
 
     def test_version_v7(self, tmp_path: Path) -> None:
         backup = _make_backup(tmp_path, {"SUMMARY.DG": _make_summary("V7.20P/08")})
-        assert _extract_version(backup) == "V7.20-1"
+        assert VAConverter.extract_version(backup) == "V7.20-1"
 
     def test_version_v10(self, tmp_path: Path) -> None:
         backup = _make_backup(tmp_path, {"SUMMARY.DG": _make_summary("V10.10P/01")})
-        assert _extract_version(backup) == "V10.10-1"
+        assert VAConverter.extract_version(backup) == "V10.10-1"
 
     def test_sans_summary_retourne_defaut(self, tmp_path: Path) -> None:
         backup = _make_backup(tmp_path, {"SYSVAR.SV": "data"})
-        version = _extract_version(backup)
+        version = VAConverter.extract_version(backup)
         assert version.startswith("V")
         assert version.endswith("-1")
 
     def test_summary_trop_court_retourne_defaut(self, tmp_path: Path) -> None:
         backup = _make_backup(tmp_path, {"SUMMARY.DG": "ligne_courte\n"})
-        version = _extract_version(backup)
+        version = VAConverter.extract_version(backup)
         assert version.endswith("-1")
-
-    def test_format_pas_de_point_supprime(self, tmp_path: Path) -> None:
-        """Vérifie qu'on NE supprime PAS le point — V9.40-1 pas V940-1."""
-        backup = _make_backup(tmp_path, {"SUMMARY.DG": _make_summary("V9.40P/55")})
-        version = _extract_version(backup)
-        assert "." in version  # le point doit être conservé
 
 
 # ---------------------------------------------------------------------------
@@ -159,27 +149,27 @@ class TestExtractVersion:
 class TestWriteRobotIni:
 
     def test_fichier_cree(self, tmp_path: Path) -> None:
-        _write_robot_ini(tmp_path, "V9.40-1")
+        VAConverter._write_robot_ini(tmp_path, "V9.40-1")
         assert (tmp_path / "robot.ini").exists()
 
     def test_contenu_section(self, tmp_path: Path) -> None:
-        _write_robot_ini(tmp_path, "V9.40-1")
+        VAConverter._write_robot_ini(tmp_path, "V9.40-1")
         content = (tmp_path / "robot.ini").read_text(encoding="utf-8")
         assert "[WinOLPC_Util]" in content
 
     def test_contenu_version(self, tmp_path: Path) -> None:
-        _write_robot_ini(tmp_path, "V9.40-1")
+        VAConverter._write_robot_ini(tmp_path, "V9.40-1")
         content = (tmp_path / "robot.ini").read_text(encoding="utf-8")
         assert "Version=V9.40-1" in content
 
     def test_contenu_robot(self, tmp_path: Path) -> None:
-        _write_robot_ini(tmp_path, "V9.40-1")
+        VAConverter._write_robot_ini(tmp_path, "V9.40-1")
         content = (tmp_path / "robot.ini").read_text(encoding="utf-8")
         assert "Robot=\\" in content
 
 
 # ---------------------------------------------------------------------------
-# _find_kconvars
+# _get_exe_path
 # ---------------------------------------------------------------------------
 
 class TestFindKconvars:
@@ -189,19 +179,19 @@ class TestFindKconvars:
         exe.write_bytes(b"")
         s = Settings()
         s.kconvars_exe = str(exe)
-        result = _find_kconvars(s)
+        result = VAConverter._get_exe_path(s)
         assert result == exe
 
     def test_leve_erreur_si_introuvable(self, mocker) -> None:
         mocker.patch("shutil.which", return_value=None)
         s = Settings()
         s.kconvars_exe = "" 
-        with pytest.raises(KconvarsNotFoundError):
-            _find_kconvars(s)
+        with pytest.raises(ExeNotFoundError):
+            VAConverter._get_exe_path(s)
 
 
 # ---------------------------------------------------------------------------
-# convert_backup — tests avec subprocess mocké
+# VAConverter.convert_files — tests avec subprocess mocké
 # ---------------------------------------------------------------------------
 
 class TestConvertBackup:
@@ -210,18 +200,14 @@ class TestConvertBackup:
         """Mock subprocess.run qui crée le .VA attendu si returncode == 0."""
         def fake_run(cmd, **kwargs):
             if returncode == 0:
-                # kconvars écrit le .VA dans cwd (work_dir)
-                cwd = Path(kwargs.get("cwd", "."))
-                # Le fichier de sortie est le 3e argument de la commande
                 out = Path(cmd[2])
                 out.write_text("$FAKE_VAR= 1\n", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, returncode, stdout="", stderr="")
 
         mocker.patch("subprocess.run", side_effect=fake_run)
-        # Patch _find_kconvars pour éviter la recherche sur disque
         fake_exe = tmp_path / "kconvars.exe"
         fake_exe.write_bytes(b"")
-        mocker.patch("services.converter._find_kconvars", return_value=fake_exe)
+        mocker.patch.object(VAConverter, "_get_exe_path", return_value=fake_exe)
 
     def test_retourne_liste_de_paths(self, tmp_path: Path, mocker) -> None:
         backup = _make_backup(tmp_path, {
@@ -229,7 +215,7 @@ class TestConvertBackup:
             "SUMMARY.DG": _make_summary(),
         })
         self._make_kconvars_mock(mocker, tmp_path)
-        result = convert_backup(backup, settings=Settings())
+        result = VAConverter.convert_files(backup, settings=Settings())
         assert isinstance(result, list)
         assert all(isinstance(p, Path) for p in result)
 
@@ -241,7 +227,7 @@ class TestConvertBackup:
             "SUMMARY.DG": _make_summary(),
         })
         self._make_kconvars_mock(mocker, tmp_path)
-        result = convert_backup(backup, settings=Settings())
+        result = VAConverter.convert_files(backup, settings=Settings())
         assert len(result) == 3
 
     def test_nom_va_correspond_au_source(self, tmp_path: Path, mocker) -> None:
@@ -250,7 +236,7 @@ class TestConvertBackup:
             "SUMMARY.DG": _make_summary(),
         })
         self._make_kconvars_mock(mocker, tmp_path)
-        result = convert_backup(backup, settings=Settings())
+        result = VAConverter.convert_files(backup, settings=Settings())
         assert result[0].stem.upper() == "SYSVAR"
         assert result[0].suffix.upper() == ".VA"
 
@@ -260,7 +246,7 @@ class TestConvertBackup:
             "SUMMARY.DG": _make_summary(),
         })
         self._make_kconvars_mock(mocker, tmp_path)
-        result = convert_backup(backup, settings=Settings())
+        result = VAConverter.convert_files(backup, settings=Settings())
         assert result[0].parent == backup
 
     def test_best_effort_ignore_fichier_echoue(self, tmp_path: Path, mocker) -> None:
@@ -272,7 +258,7 @@ class TestConvertBackup:
         })
         fake_exe = tmp_path / "kconvars.exe"
         fake_exe.write_bytes(b"")
-        mocker.patch("services.converter._find_kconvars", return_value=fake_exe)
+        mocker.patch.object(VAConverter, "_get_exe_path", return_value=fake_exe)
 
         call_count = 0
 
@@ -289,7 +275,7 @@ class TestConvertBackup:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         mocker.patch("subprocess.run", side_effect=selective_run)
-        result = convert_backup(backup, settings=Settings())
+        result = VAConverter.convert_files(backup, settings=Settings())
         assert len(result) == 1
         assert result[0].stem.upper() == "GOOD"
 
@@ -300,17 +286,17 @@ class TestConvertBackup:
         })
         fake_exe = tmp_path / "kconvars.exe"
         fake_exe.write_bytes(b"")
-        mocker.patch("services.converter._find_kconvars", return_value=fake_exe)
+        mocker.patch.object(VAConverter, "_get_exe_path", return_value=fake_exe)
         mocker.patch(
             "subprocess.run",
             return_value=subprocess.CompletedProcess([], 1, stdout="", stderr="fail"),
         )
         with pytest.raises(ConverterError, match="Aucun fichier .VA produit"):
-            convert_backup(backup, settings=Settings())
+            VAConverter.convert_files(backup, settings=Settings())
 
     def test_leve_erreur_si_dossier_inexistant(self) -> None:
         with pytest.raises(ConverterError, match="introuvable"):
-            convert_backup(Path("/inexistant/chemin"), settings=Settings())
+            VAConverter.convert_files(Path("/inexistant/chemin"), settings=Settings())
 
     def test_timeout_leve_converter_error(self, tmp_path: Path, mocker) -> None:
         backup = _make_backup(tmp_path, {
@@ -319,13 +305,13 @@ class TestConvertBackup:
         })
         fake_exe = tmp_path / "kconvars.exe"
         fake_exe.write_bytes(b"")
-        mocker.patch("services.converter._find_kconvars", return_value=fake_exe)
+        mocker.patch.object(VAConverter, "_get_exe_path", return_value=fake_exe)
         mocker.patch(
             "subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="kconvars", timeout=30),
         )
         with pytest.raises(ConverterError, match="timeout"):
-            convert_backup(backup, settings=Settings(), timeout=30)
+            VAConverter.convert_files(backup, settings=Settings(), timeout=30)
 
     def test_progress_callback_appele(self, tmp_path: Path, mocker) -> None:
         backup = _make_backup(tmp_path, {
@@ -335,7 +321,7 @@ class TestConvertBackup:
         })
         self._make_kconvars_mock(mocker, tmp_path)
         calls = []
-        convert_backup(backup, settings=Settings(), progress_cb=lambda c, t, m: calls.append((c, t)))
+        VAConverter.convert_files(backup, settings=Settings(), progress_cb=lambda c, t, m: calls.append((c, t)))
         assert len(calls) == 2
         assert calls[0] == (1, 2)
         assert calls[1] == (2, 2)
@@ -361,9 +347,9 @@ class TestConvertBackup:
         mocker.patch("subprocess.run", side_effect=capturing_run)
         fake_exe = tmp_path / "kconvars.exe"
         fake_exe.write_bytes(b"")
-        mocker.patch("services.converter._find_kconvars", return_value=fake_exe)
+        mocker.patch.object(VAConverter, "_get_exe_path", return_value=fake_exe)
 
-        convert_backup(backup, settings=Settings())
+        VAConverter.convert_files(backup, settings=Settings())
         assert "/ver" in captured_cmds[0]
         assert "V9.40-1" in captured_cmds[0]
 
@@ -375,7 +361,7 @@ class TestConvertBackup:
         })
         fake_exe = tmp_path / "kconvars.exe"
         fake_exe.write_bytes(b"")
-        mocker.patch("services.converter._find_kconvars", return_value=fake_exe)
+        mocker.patch.object(VAConverter, "_get_exe_path", return_value=fake_exe)
 
         ini_found = []
 
@@ -387,7 +373,7 @@ class TestConvertBackup:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         mocker.patch("subprocess.run", side_effect=check_ini)
-        convert_backup(backup, settings=Settings())
+        VAConverter.convert_files(backup, settings=Settings())
         assert all(ini_found), "robot.ini absent du cwd lors de l'appel kconvars"
 
 

@@ -459,3 +459,7 @@ class AppViewModel:
         logger.log(_LOG_LEVELS.get(level, logging.INFO), msg)
         if self.on_log_message:
             self.on_log_message(msg, level)
+            
+    def emit_log(self, msg: str, level: str = "info") -> None:
+        """API publique pour les composants UI."""
+        self._emit_log(msg, level)
